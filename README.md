@@ -1,8 +1,7 @@
 # sumfem
 
 Finite element models written as summable components, with
-[DOLFINx](https://github.com/FEniCS/dolfinx/). It was developed for redox flow
-batteries, whose models are in `sumfem.models`.
+[DOLFINx](https://github.com/FEniCS/dolfinx/).
 
 ## Installation
 
@@ -10,45 +9,12 @@ This software package requires an installation of FEniCS on your system.
 It needs the main branch of DOLFINx (0.12.0.dev0 or newer), for its fixes of
 mixed-dimensional and manifold assembly. The nightly Docker image and Spack's
 `main` versions provide it. The Ubuntu, Debian and conda packages carry
-releases, so they work once DOLFINx 0.12 is released.
-FEniCS can be installed in many ways, including:
-
-### Ubuntu/Debian packages
-
-```bash
-sudo add-apt-repository ppa:fenics-packages/fenics
-sudo apt update
-sudo apt install fenicsx
-```
-
-and then call
-
-```bash
-python3 -m pip install -e .
-```
-
-from the root of this repo to install the package.
+releases, so they can be used once DOLFINx 0.12 is released.
 
 ### Docker
 
 ```bash
 docker run -ti -v $(pwd):/root/shared -w /root/shared --rm ghcr.io/fenics/dolfinx/dolfinx:nightly
-```
-
-and then call
-
-```bash
-python3 -m pip install -e .
-```
-
-from the root of this repo to install the package.
-
-### Conda
-
-```bash
-conda create -n fenicsx_env
-conda activate fenicsx_env
-conda install -c conda-forge fenics-dolfinx matplotlib
 ```
 
 and then call

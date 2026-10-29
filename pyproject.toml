@@ -11,7 +11,6 @@ description = "Reusable, summable variational models for FEniCSx"
 authors = [
     { name = "Jørgen S. Dokken", email = "dokken@simula.no" },
     { name = "Amirhossein Aghabarari", email = "amirhossein.aghabarari@nmbu.no" },
-    { name = "Henrik N.T. Finsberg", email = "henriknf@simula.no" },
 ]
 license = "MIT"
 readme = "README.md"
