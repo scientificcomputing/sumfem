@@ -48,7 +48,8 @@ def create_line(
     """
     _p0 = np.asarray(p0)
     _p1 = np.asarray(p1)
-    assert _p0.shape == _p1.shape, "Points must have the same dimension"
+    if not _p0.shape == _p1.shape:
+        raise ValueError("Points must have the same dimension")
     if comm.rank == 0:
         weights = np.linspace(0, 1, num_points, endpoint=True)
         points = (_p0 + np.outer(weights, (_p1 - _p0))).astype(_p0.dtype)
@@ -92,11 +93,11 @@ def interpolate_to_line(
     Raises:
         ValueError: If the expression is not on a single mesh.
     """
-    line_mesh = create_line(p0, p1, num_points)
     ufl_domain = ufl.domain.extract_unique_domain(expr)
     if not isinstance(ufl_domain, ufl.Mesh):
         raise ValueError(f"{expr!r} is not defined on a single mesh.")
     mesh = dolfinx.mesh.Mesh(ufl_domain.ufl_cargo(), ufl_domain)
+    line_mesh = create_line(p0, p1, num_points, comm=mesh.comm)
     input_space = dolfinx.fem.functionspace(mesh, element)
     input_expr = dolfinx.fem.Expression(expr, input_space.element.interpolation_points)
     input_func = dolfinx.fem.Function(input_space)
