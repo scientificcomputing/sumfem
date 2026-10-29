@@ -59,9 +59,13 @@ jobs:
       - name: Install sumfem with its test dependencies
         run: python3 -m pip install -e .[test] mypy --no-build-isolation
 
-      - name: Import the package
-        # Replaced by the test runs once the first tests are migrated
-        run: python3 -c "import sumfem"
+      - name: Run the tests
+        run: python3 -m pytest -v tests
+
+      - name: Run the tests on 2 MPI ranks
+        # mpi4py aborts every rank when one raises, rather than leaving the
+        # others waiting
+        run: mpirun -n 2 python3 -m mpi4py -m pytest tests
 
       - name: Check the types
         run: python3 -m mypy src/sumfem

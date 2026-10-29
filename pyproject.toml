@@ -52,6 +52,12 @@ exclude = ["docs/", "build/"]
 # Folder to check with mypy
 files = ["src", "tests"]
 
+# Every function of the package is annotated; the tests need not be
+[[tool.mypy.overrides]]
+module = "sumfem.*"
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
 [tool.ruff]
 src = ["src", "docs", "tests", "examples"]
 indent-width = 4
