@@ -6,9 +6,8 @@ The generic framework has two layers, imported as subpackages:
   domains, fields, parameters, residuals and functionals, systems of
   equations, sequences of stages, time derivatives, boundary conditions,
   transfers and dimensional analysis.
-- :mod:`sumfem.discrete`, which binds them to meshes and solves them:
-  discretizations, discrete systems and sequences, solvers, time stepping
-  and simulations.
+- :mod:`sumfem.discrete`, which binds them to meshes: discretizations,
+  and the discrete systems and boundary conditions.
 
 Battery physics and the other model families live in
 :mod:`sumfem.models`, and post-processing in
@@ -20,5 +19,6 @@ Battery physics and the other model families live in
     u = symbolic.Field("u", domain, ("Lagrange", 1))
 """
 
-# The subpackages are imported here once they are migrated
-__all__: list[str] = []
+from . import discrete, symbolic
+
+__all__ = ["discrete", "symbolic"]

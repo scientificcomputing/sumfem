@@ -58,7 +58,7 @@ class DirichletBC:
 
         # Extract the entities to apply the Dirichlet condition to
         domain = field.domain
-        marked = discretization.maps.marked_mesh(domain)
+        marked = discretization.maps.mesh_data(domain)
         dim = domain.entity_dimension(condition.entity_type)
         marked.mesh.topology.create_connectivity(dim, domain.tdim)
         entities = np.unique(
