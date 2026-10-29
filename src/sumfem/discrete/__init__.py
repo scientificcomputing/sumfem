@@ -7,8 +7,8 @@
 - :func:`discretize`: the :class:`Discretization` of symbolic components on
   domain maps, holding one DOLFINx function per terminal, shared by all of
   them. ``disc[component]`` gives a component's discrete counterpart.
-- :class:`System`: a symbolic system discretized on the meshes, with its
-  residual, Jacobian and preconditioner compiled.
+- :class:`System`: the residual, Jacobian and preconditioner of a symbolic
+  system, compiled and bound to the meshes and functions.
 - :class:`DirichletBC`: a symbolic boundary condition on the meshes.
 - :func:`counterpart`: the discrete counterpart of a symbolic object, with
   options.
