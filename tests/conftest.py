@@ -4,6 +4,7 @@ The tests use pytest's importlib import mode, so the models are handed to
 tests through the ``toy`` fixture instead of being imported.
 """
 
+import gc
 import types
 
 from mpi4py import MPI
@@ -18,6 +19,26 @@ from sumfem.discrete import MeshData
 from sumfem.symbolic import Domain, Field, Residual
 
 SIDES = ("Left", "Right", "Bottom", "Top")
+
+
+@pytest.fixture(autouse=True)
+def problems_are_freed_by_reference_counting():
+    """Fail a test that leaves a DOLFINx problem to the garbage collector.
+
+    A problem destroys its PETSc objects when it is deleted, and destroying
+    them is collective. A problem in a reference cycle is deleted by the
+    garbage collector, which runs at different times on different
+    processes, so a parallel run deadlocks, often in a later test. A test
+    that replaces a method of a solver with a closure over the solver makes
+    such a cycle; patch it with ``monkeypatch``, which breaks the cycle at
+    teardown.
+    """
+    yield
+    problems = (dolfinx.fem.petsc.NonlinearProblem, dolfinx.fem.petsc.LinearProblem)
+    left = sum(isinstance(o, problems) for o in gc.get_objects())
+    gc.collect()
+    if left:
+        pytest.fail(f"{left} DOLFINx problem(s) left to the garbage collector.")
 
 
 class Accumulation(Residual):

@@ -2,7 +2,7 @@
 
 Models stay semi-discrete: a time derivative is written with the
 placeholder ``field.dot``. A time-stepping scheme, such as
-:class:`~sumfem.discrete.time_stepping.BDF`, replaces the
+:class:`~sumfem.solvers.time_stepping.BDF`, replaces the
 placeholder when the problem is discretized in time. A model becomes
 transient through terms with ``field.dot``, or with :func:`Dt` of an
 expression such as the momentum ``H * u``::

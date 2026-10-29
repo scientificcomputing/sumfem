@@ -1,10 +1,12 @@
 """Jacobians as components: hand-written, derived, and as preconditioners."""
 
 import dolfinx.fem.petsc
+import numpy as np
 import pytest
 import ufl
 
 from sumfem.discrete import DomainMaps, discretize
+from sumfem.solvers import Solver
 from sumfem.symbolic import (
     ComponentError,
     Domain,
@@ -106,6 +108,22 @@ def test_jacobians_sum_copy_and_are_checked(toy):
         NotBilinear("bad").form
     with pytest.raises(TypeError):
         MassMatrix("m", u) + toy.Diffusion("d", u)
+
+
+def test_a_preconditioned_solve_matches_the_plain_one(toy, square, sides):
+    from sumfem.symbolic import DirichletBC
+
+    domain = Domain("cell", "triangle")
+    u = Field("u", domain, ("Lagrange", 1))
+    residual = toy.Diffusion("d", u) + toy.Source("s", u, f=1.0)
+    bcs = [DirichletBC(u, sides, 0.0)]
+    options = {"ksp_type": "cg", "pc_type": "jacobi", "ksp_rtol": 1e-12}
+    solutions = []
+    for coupling in (residual, residual.with_preconditioner(residual.to_jacobian())):
+        disc = discretize([coupling], DomainMaps({"cell": square()}))
+        Solver(disc[coupling], bcs, petsc_options=options).solve()
+        solutions.append(disc.function(u).x.array.copy())
+    np.testing.assert_allclose(solutions[0], solutions[1], atol=1e-10)
 
 
 def test_derived_jacobians_need_a_field(domain):
