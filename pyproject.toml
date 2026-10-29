@@ -7,7 +7,7 @@ requires = [
 [project]
 name = "sumfem"
 version = "0.1.0.dev0"
-description = "RedOx flow battery interface for FEniCSx"
+description = "Reusable, summable variational models for FEniCSx"
 authors = [
     { name = "Jørgen S. Dokken", email = "dokken@simula.no" },
     { name = "Amirhossein Aghabarari", email = "amirhossein.aghabarari@nmbu.no" },

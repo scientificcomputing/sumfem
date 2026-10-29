@@ -218,3 +218,43 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# LaTeX build products
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.out
+*.run.xml
+*.synctex.gz
+*.toc
+
+# Meshes, images, documents and simulation output, which the scripts that
+# need them generate, and which are never committed
+*.msh
+*.xdmf
+*.h5
+*.bp
+*.vtu
+*.pvtu
+*.pvd
+*.vtk
+*.npy
+*.npz
+*.csv
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+*.pdf
+*.html
+
+# Jupyter Book
+_build/
+
+# Editors and OS
+.vscode/
+.DS_Store
