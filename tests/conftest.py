@@ -6,10 +6,18 @@ tests through the ``toy`` fixture instead of being imported.
 
 import types
 
+from mpi4py import MPI
+
+import dolfinx.fem.petsc
+import dolfinx.mesh
+import numpy as np
 import pytest
 import ufl
 
+from sumfem.discrete import MeshData
 from sumfem.symbolic import Domain, Field, Residual
+
+SIDES = ("Left", "Right", "Bottom", "Top")
 
 
 class Accumulation(Residual):
@@ -107,3 +115,39 @@ def toy():
 def domain():
     """A triangle domain."""
     return Domain("cell", "triangle")
+
+
+def unit_square(cell: str = "triangle", n: int = 4) -> MeshData:
+    """A unit square with markers for its sides and its left and right halves."""
+    mesh = dolfinx.mesh.create_unit_square(
+        MPI.COMM_WORLD, n, n, cell_type=dolfinx.mesh.to_type(cell)
+    )
+    eps = 1e-10
+    return MeshData.from_locators(
+        mesh,
+        {
+            2: {
+                "LeftHalf": lambda x: x[0] <= 0.5 + eps,
+                "RightHalf": lambda x: x[0] >= 0.5 - eps,
+            },
+            1: {
+                "Left": lambda x: np.isclose(x[0], 0.0),
+                "Right": lambda x: np.isclose(x[0], 1.0),
+                "Bottom": lambda x: np.isclose(x[1], 0.0),
+                "Top": lambda x: np.isclose(x[1], 1.0),
+            },
+        },
+        boundary=True,
+    )
+
+
+@pytest.fixture
+def square():
+    """Factory for unit squares with side and half markers, see :func:`unit_square`."""
+    return unit_square
+
+
+@pytest.fixture
+def sides():
+    """Marker names of the four sides of the unit square."""
+    return SIDES
