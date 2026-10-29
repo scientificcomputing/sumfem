@@ -97,7 +97,8 @@ def interpolate_to_line(
     if not isinstance(ufl_domain, ufl.Mesh):
         raise ValueError(f"{expr!r} is not defined on a single mesh.")
     mesh = dolfinx.mesh.Mesh(ufl_domain.ufl_cargo(), ufl_domain)
-    line_mesh = create_line(p0, p1, num_points, comm=mesh.comm)
+    _comm =  typing.cast(MPI.Intracomm, mesh.comm)
+    line_mesh = create_line(p0, p1, num_points, comm=_comm)
     input_space = dolfinx.fem.functionspace(mesh, element)
     input_expr = dolfinx.fem.Expression(expr, input_space.element.interpolation_points)
     input_func = dolfinx.fem.Function(input_space)
