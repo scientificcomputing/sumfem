@@ -1,12 +1,9 @@
 """Exceptions and name validation shared by the symbolic layer."""
 
-import ufl
-
 __all__ = [
     "ComponentError",
     "SystemBuildError",
     "check_name",
-    "check_rank",
     "qualified_name",
 ]
 
@@ -48,29 +45,3 @@ def check_name(name: object, kind: str, allow_dots: bool = True) -> str:
     if not allow_dots and "." in name:
         raise ComponentError(f"{kind} name {name!r} may not contain '.'.")
     return name
-
-
-def check_rank(form: ufl.Form | ufl.ZeroBaseForm, rank: int, what: str) -> None:
-    """Check that a form has exactly the given rank.
-
-    A form of rank ``r`` has arguments numbered ``0, ..., r - 1``: a residual
-    has rank 1 (test functions only), a Jacobian or preconditioner rank 2
-    (test and trial functions). For a residual this rejects trial functions,
-    and a form with no test function at all.
-
-    Args:
-        form: The form to check.
-        rank: The expected rank.
-        what: Description of the form, used in the error message.
-
-    Raises:
-        ComponentError: If the argument numbers of the form are not
-            ``0, ..., rank - 1``.
-    """
-    numbers = {a.number() for a in form.arguments()}
-    expected = set(range(rank))
-    if numbers != expected:
-        raise ComponentError(
-            f"{what} must have rank {rank}, "
-            f"but its arguments have numbers {sorted(numbers)}."
-        )
