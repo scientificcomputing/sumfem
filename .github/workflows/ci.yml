@@ -1,0 +1,67 @@
+name: Tests and examples
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  # The containers run as root, which Open MPI refuses without these
+  OMPI_ALLOW_RUN_AS_ROOT: 1
+  OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
+  # The runners may have fewer cores than MPI ranks, which Open MPI 4 and 5
+  # refuse without these
+  OMPI_MCA_rmaps_base_oversubscribe: 1
+  PRTE_MCA_rmaps_default_mapping_policy: :oversubscribe
+
+jobs:
+  lint:
+    name: Lint and repository checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Install ruff
+        run: python3 -m pip install ruff
+
+      - name: Check the code style
+        run: |
+          ruff check .
+          ruff format --check .
+
+      - name: Check that no generated or binary files are tracked
+        # Meshes, images, documents and simulation output are made by the
+        # scripts that need them, never committed
+        run: |
+          if git ls-files | grep -iE '\.(msh|xdmf|h5|bp|png|jpe?g|gif|svg|pdf|html?|vtu|pvtu|pvd|vtk|npy|npz)$'; then
+            echo "These generated or binary files must not be committed."
+            exit 1
+          fi
+
+  tests:
+    name: Tests, serial and on 2 MPI ranks
+    runs-on: ubuntu-latest
+    # DOLFINx main, as pyproject.toml requires
+    container: ghcr.io/fenics/dolfinx/dolfinx:nightly
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Install sumfem with its test dependencies
+        run: python3 -m pip install -e .[test] mypy --no-build-isolation
+
+      - name: Import the package
+        # Replaced by the test runs once the first tests are migrated
+        run: python3 -c "import sumfem"
+
+      - name: Check the types
+        run: python3 -m mypy src/sumfem
