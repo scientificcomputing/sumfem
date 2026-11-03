@@ -48,7 +48,7 @@ jobs:
 
       - name: Install sumfem with its test and documentation dependencies
         id: install
-        run: python3 -m pip install -e .[test,docs]
+        run: python3 -m pip install -e .[test,docs] --no-build-isolation
 
       - name: Run the tests
         id: tests
