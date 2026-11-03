@@ -1,0 +1,19 @@
+name: Documentation
+
+# Builds the documentation of a pull request as docs.yml would publish it, and
+# uploads its HTML as the artifact `docs-pr`. The tests are left to tests.yml.
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    uses: ./.github/workflows/docs-build.yml
+    with:
+      label: pr
+      ref: ${{ github.sha }}
+      image: ghcr.io/fenics/dolfinx/dolfinx:nightly
+      asset: docs-pr.tar.gz
+      tests: false

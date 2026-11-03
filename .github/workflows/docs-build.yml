@@ -1,0 +1,96 @@
+name: Build a version of the documentation
+
+# Tests one version of sumfem in a DOLFINx image and builds its documentation, and uploads the
+# HTML as the artifact `docs-<label>`, only if the tests and the build pass. A release that fails
+# to install, test or build uploads a `.failed` mark instead, so that the deploy workflow doesn't
+# build it again. The deploy workflow, docs.yml, uses this for each version it builds, and
+# docs-pr.yml for pull requests, without the tests.
+on:
+  workflow_call:
+    inputs:
+      label:
+        description: "Name of the version, e.g. main or v0.1"
+        type: string
+        required: true
+      ref:
+        description: "Commit to build"
+        type: string
+        required: true
+      image:
+        description: "DOLFINx image to build in"
+        type: string
+        required: true
+      asset:
+        description: "Name of the tarball of the HTML"
+        type: string
+        required: true
+      tests:
+        description: "Run the tests before building, so that only a working version is built"
+        type: boolean
+        default: true
+
+jobs:
+  build:
+    name: Build ${{ inputs.label }}
+    runs-on: ubuntu-latest
+    container: ${{ inputs.image }}
+    env:
+      ASSET: ${{ inputs.asset }}
+
+    steps:
+      - name: Check out the version
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Load the Open MPI settings
+        run: grep -v '^#' .github/workflows/openmpi.env >> "$GITHUB_ENV"
+
+      - name: Install sumfem with its test and documentation dependencies
+        id: install
+        run: python3 -m pip install -e .[test,docs]
+
+      - name: Run the tests
+        id: tests
+        if: ${{ inputs.tests }}
+        # mpi4py aborts every rank when one raises, rather than leaving the
+        # others waiting
+        run: |
+          python3 -m pytest tests
+          mpirun -n 2 python3 -m mpi4py -m pytest tests
+
+      - name: Build the documentation
+        id: book
+        run: jupyter-book build .
+
+      - name: Package the HTML
+        run: tar -czf "$ASSET" -C _build/html .
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: docs-${{ inputs.label }}
+          path: ${{ env.ASSET }}
+          retention-days: 2
+          if-no-files-found: error
+
+      # So that the deploy workflow doesn't build the release again until the mark is deleted.
+      # Other failures, such as of the checkout, are more likely to pass next time, so the release
+      # is built again. Only releases are marked: main is built again on every push.
+      - name: Mark the build as failed
+        if: >-
+          ${{ failure() && startsWith(inputs.label, 'v') && (steps.install.outcome == 'failure'
+          || steps.tests.outcome == 'failure' || steps.book.outcome == 'failure') }}
+        env:
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          WHAT: ${{ inputs.ref }} in ${{ inputs.image }}
+        run: |
+          MARK="${ASSET%.tar.gz}.failed"
+          echo "Failed to build ${WHAT}: ${RUN}" > "$MARK"
+          echo "MARK=$MARK" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v7
+        if: ${{ failure() && env.MARK }}
+        with:
+          name: failed-${{ inputs.label }}
+          path: ${{ env.MARK }}
+          retention-days: 2

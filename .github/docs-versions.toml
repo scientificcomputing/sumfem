@@ -1,0 +1,19 @@
+# Versions of the documentation published on the web page, read by .github/scripts/docs_site.py.
+#
+# "main" is always built against DOLFINx nightly. Each minor release of sumfem from `oldest`
+# onwards gets one slot (e.g. v0.1), filled by its newest `vX.Y.Z[.postN]` tag. The newest slot is
+# also published as "stable", which is where the root of the web page leads. Until the first
+# release, the root leads to main.
+# Each tag is built once, and its HTML is kept in the `docs-archive` release.
+
+# Oldest minor release to publish
+oldest = "0.1"
+
+# DOLFINx image to build main in
+nightly_image = "ghcr.io/fenics/dolfinx/dolfinx:nightly"
+
+# DOLFINx image to test and build each minor release of sumfem in. The version numbers of sumfem
+# and DOLFINx are not related, so each minor release needs its own entry; a release without one
+# is not published.
+[images]
+# "0.1" = "ghcr.io/fenics/dolfinx/dolfinx:v0.12.0"

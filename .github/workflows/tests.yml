@@ -1,0 +1,40 @@
+name: Tests
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  tests:
+    name: Tests, serial and on 2 MPI ranks
+    runs-on: ubuntu-latest
+    # DOLFINx main, as pyproject.toml requires
+    container: ghcr.io/fenics/dolfinx/dolfinx:nightly
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Load the Open MPI settings
+        run: grep -v '^#' .github/workflows/openmpi.env >> "$GITHUB_ENV"
+
+      - name: Install sumfem with its test dependencies
+        run: python3 -m pip install -e .[test] mypy --no-build-isolation
+
+      - name: Run the tests
+        run: python3 -m pytest -v tests
+
+      - name: Run the tests on 2 MPI ranks
+        # mpi4py aborts every rank when one raises, rather than leaving the
+        # others waiting
+        run: mpirun -n 2 python3 -m mpi4py -m pytest tests
+
+      - name: Check the types
+        run: python3 -m mypy src/sumfem
