@@ -1,0 +1,38 @@
+name: Lint
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: Lint and repository checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Install ruff
+        run: python3 -m pip install ruff
+
+      - name: Check the code style
+        run: |
+          ruff check .
+          ruff format --check .
+
+      - name: Check that no generated or binary files are tracked
+        # Meshes, images, documents and simulation output are made by the
+        # scripts that need them, never committed
+        run: |
+          if git ls-files | grep -iE '\.(msh|xdmf|h5|bp|png|jpe?g|gif|svg|pdf|html?|vtu|pvtu|pvd|vtk|npy|npz)$'; then
+            echo "These generated or binary files must not be committed."
+            exit 1
+          fi
