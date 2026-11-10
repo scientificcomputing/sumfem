@@ -116,7 +116,9 @@ marked = discrete.MeshData.from_locators(
 
 u = poisson.field
 domain = u.domain
-disc = discrete.discretize([poisson], discrete.DomainMaps({domain: marked}))
+domain_maps = discrete.DomainMaps({domain: marked})
+components = [poisson]
+disc = discrete.discretize(components, domain_maps)
 
 # Parameters are set by object or by name:
 
@@ -143,12 +145,14 @@ print(f"Newton iterations: {solver.iterations}")
 # function and the exact solution as a function of the mesh's coordinates.
 
 
+# +
 def exact(x):
     return 1 + x[0] ** 2 + 2 * x[1] ** 2
 
 
 print(f"L2 error: {error(disc[u], exact):.2e}")
 assert error(disc[u], exact) < 1e-10
+# -
 
 # The same symbolic model can be discretized again on another mesh, without
 # writing it again; only the forms are compiled for the new mesh's cell.

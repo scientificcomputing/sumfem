@@ -79,9 +79,11 @@ print_markers(from_locators)
 # ## From existing mesh tags
 #
 # Mesh tags made with DOLFINx, or read from a file, come with tag values of
-# their own, here `boundary_tag` on every boundary facet. The constructor names
-# them: for each entity dimension, the tags, and the tag values of each marker
-# name, here `"Boundary"` for `boundary_tag`. A marker may have several values.
+# their own, here `boundary_tag` on every boundary facet.
+# {py:meth}`from_meshtags <sumfem.discrete.MeshData.from_meshtags>` names them:
+# for each mesh tags, the tag values of each marker name, here `"Boundary"` for
+# `boundary_tag`. The dimension of a marker is that of its mesh tags, and a
+# marker may stand for several values, e.g. `{"Walls": (2, 3)}`.
 
 boundary_tag = 1
 square.topology.create_connectivity(tdim - 1, tdim)
@@ -89,8 +91,8 @@ boundary_facets = dolfinx.mesh.exterior_facet_indices(square.topology)
 facet_tags = dolfinx.mesh.meshtags(
     square, tdim - 1, boundary_facets, np.full_like(boundary_facets, boundary_tag)
 )
-from_tags = discrete.MeshData(
-    square, {tdim - 1: facet_tags}, {tdim - 1: {"Boundary": (boundary_tag,)}}
+from_tags = discrete.MeshData.from_meshtags(
+    square, {facet_tags: {"Boundary": (boundary_tag,)}}
 )
 
 # The tag values differ from those `from_locators` chose, but the name marks

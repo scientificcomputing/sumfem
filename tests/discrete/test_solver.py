@@ -3,6 +3,8 @@
 import gc
 import weakref
 
+from petsc4py import PETSc
+
 import pytest
 import ufl
 
@@ -38,3 +40,27 @@ def test_solver_is_freed_without_the_garbage_collector(toy, square, sides, symbo
     finally:
         if enabled:
             gc.enable()
+
+
+@pytest.mark.parametrize(
+    "snes_type, line_search", [("newtonls", True), ("ksponly", False)]
+)
+def test_the_default_line_search_is_only_set_for_line_search_methods(
+    snes_type, line_search, toy, square, sides
+):
+    """The default line search is set for a method that uses one only.
+    PETSc would report it as an unused option otherwise, e.g. for ksponly.
+    """
+    domain = Domain("cell", "triangle")
+    c = Field("c", domain, ("Lagrange", 1))
+    model = toy.Diffusion("d", c) + toy.Source("s", c, f=1.0)
+    disc = discretize([model], DomainMaps({"cell": square()}))
+    prefix = f"line_search_{snes_type}_"
+    solver = Solver(
+        disc[model],
+        [DirichletBC(c, sides, 0.0)],
+        petsc_options={"snes_type": snes_type},
+        petsc_options_prefix=prefix,
+    )
+    solver.solve()
+    assert PETSc.Options().hasName(f"{prefix}snes_linesearch_type") == line_search

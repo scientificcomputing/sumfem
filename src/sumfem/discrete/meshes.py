@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import types
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 
 import basix
 import basix.ufl
@@ -47,9 +47,9 @@ class MeshData:
     It knows nothing of symbolic domains: :class:`DomainMaps` pairs domains
     with meshes. For each entity dimension, a marker name maps to tag values. Create it
     from a locator function for each dimension and name with
-    :meth:`from_locators`, from existing mesh tags for each dimension and the
-    integer tag values of each name directly, e.g.
-    ``MeshData(mesh, {1: facet_tags}, {1: {"Inlet": (1,), "Walls": (2, 3)}})``,
+    :meth:`from_locators`, from existing mesh tags and the integer tag values of
+    each name with :meth:`from_meshtags`, e.g.
+    ``MeshData.from_meshtags(mesh, {facet_tags: {"Inlet": (1,), "Walls": (2, 3)}})``,
     or from the physical groups of a mesh read with :mod:`dolfinx.io.gmsh`
     with :meth:`from_gmsh`.
 
@@ -59,8 +59,9 @@ class MeshData:
         markers: The tag values of each named marker, by entity dimension.
 
     Raises:
-        ValueError: If mesh tags are given for another dimension than their
-            own, or markers for a dimension without mesh tags.
+        ValueError: If mesh tags are of another mesh, or given for another
+            dimension than their own, or markers for a dimension without mesh
+            tags.
     """
 
     mesh: dolfinx.mesh.Mesh
@@ -71,6 +72,12 @@ class MeshData:
         for dim, tags in self.tags.items():
             if tags.dim != dim:
                 raise ValueError(f"Mesh tags of dimension {tags.dim} given as {dim}.")
+            # The Python topologies are new wrappers, the C++ ones are shared
+            if tags.topology._cpp_object is not self.mesh.topology._cpp_object:
+                raise ValueError(
+                    f"The mesh tags of dimension {dim} are of another mesh: their "
+                    "entity indices refer to that mesh."
+                )
         for dim in self.markers:
             if dim not in self.tags:
                 raise ValueError(f"Markers of dimension {dim} have no mesh tags.")
@@ -96,6 +103,41 @@ class MeshData:
         return cls(data.mesh, tags, markers)
 
     @classmethod
+    def from_meshtags(
+        cls,
+        mesh: dolfinx.mesh.Mesh,
+        markers: Mapping[dolfinx.mesh.MeshTags, Mapping[str, Sequence[int]]],
+    ) -> MeshData:
+        """Name the tag values of existing mesh tags.
+
+        Each mesh tags is given with the tag values of each of its marker
+        names, e.g. ``{facet_tags: {"Inlet": (1,), "Walls": (2, 3)}}``. Their
+        entity dimension is their own, ``dim`` of the mesh tags.
+
+        Args:
+            mesh: The mesh of the tags.
+            markers: The tag values of each marker name, by mesh tags.
+
+        Raises:
+            ValueError: If two of the mesh tags have the same dimension, or any
+                are of another mesh.
+        """
+        tags: dict[int, dolfinx.mesh.MeshTags] = {}
+        names: dict[int, dict[str, tuple[int, ...]]] = {}
+        for meshtags, values in markers.items():
+            if meshtags.dim in tags:
+                raise ValueError(
+                    f"Two mesh tags of dimension {meshtags.dim} given: give one "
+                    "per dimension, with all its markers."
+                )
+            tags[meshtags.dim] = meshtags
+            names[meshtags.dim] = {
+                name: tuple(int(v) for v in tag_values)
+                for name, tag_values in values.items()
+            }
+        return cls(mesh, tags, names)
+
+    @classmethod
     def from_locators(
         cls,
         mesh: dolfinx.mesh.Mesh,
@@ -107,11 +149,17 @@ class MeshData:
         Args:
             mesh: The mesh.
             locators: For each entity dimension, a locator per marker name.
-                Where locators overlap, the later marker wins.
+                Each entity may be marked by one of them only, as mesh tags
+                hold one value per entity.
             boundary: Mark only entities on the boundary of the mesh, for
                 dimensions below the cell dimension. Use this for boundary
                 markers, so that interior facets touching the boundary are
                 not marked.
+
+        Raises:
+            ValueError: If the locators of two markers of a dimension mark the
+                same entity, on any process. Mark disjoint parts instead, and
+                name unions of them with :meth:`from_meshtags`.
         """
         tags: dict[int, dolfinx.mesh.MeshTags] = {}
         markers: dict[int, dict[str, tuple[int, ...]]] = {}
@@ -128,9 +176,25 @@ class MeshData:
                 if boundary and dim < tdim
                 else dolfinx.mesh.locate_entities
             )
+            names = list(named)
+            overlaps: set[tuple[str, str]] = set()
             for value, (name, locator) in enumerate(named.items(), start=1):
-                values[locate(mesh, dim, locator)] = value
+                entities = locate(mesh, dim, locator)
+                for earlier in np.unique(values[entities]):
+                    if earlier != 0:
+                        overlaps.add((names[earlier - 1], name))
+                values[entities] = value
                 markers[dim][name] = (value,)
+            # A process may find an overlap the others do not see: all raise
+            found = set().union(*mesh.comm.allgather(overlaps))
+            if found:
+                first, second = sorted(found)[0]
+                raise ValueError(
+                    f"The markers {first!r} and {second!r} of dimension {dim} mark "
+                    "the same entities, but mesh tags hold one value per entity. "
+                    "Mark disjoint parts, and name unions of them with "
+                    "MeshData.from_meshtags."
+                )
             indices = np.flatnonzero(values).astype(np.int32)
             tags[dim] = dolfinx.mesh.meshtags(mesh, dim, indices, values[indices])
         return cls(mesh, tags, markers)
