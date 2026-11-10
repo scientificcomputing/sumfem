@@ -74,7 +74,6 @@
 ## Models from plain UFL
 
 ```{eval-rst}
-.. autofunction:: from_ufl
 
 .. autoclass:: UFLResidual
    :members:
