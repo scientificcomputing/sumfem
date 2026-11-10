@@ -1,10 +1,11 @@
-"""Residuals from plain UFL forms, as written for DOLFINx.
+"""Residuals from plain UFL forms, as in the UFL files of DOLFINx C++ demos.
 
 A residual, and optionally its Jacobian and a preconditioner, written with
 plain UFL objects, a :class:`ufl.Mesh`, :class:`ufl.FunctionSpace`,
-:class:`ufl.Coefficient`, :class:`ufl.Constant` and arguments, as in the
-DOLFINx demos, is turned by :class:`UFLResidual` into a residual on sumfem
-terminals. It is discretized and solved like any residual.
+:class:`ufl.Coefficient`, :class:`ufl.Constant` and arguments, without
+data, as in the UFL files of the DOLFINx C++ demos, is turned by
+:class:`UFLResidual` into a residual on sumfem terminals. It is discretized
+and solved like any residual.
 
 A model written both in plain UFL and from components gives the same
 discrete residual, Jacobian and solution, which verifies the components.

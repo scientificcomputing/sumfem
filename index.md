@@ -11,7 +11,7 @@ solved with DOLFINx and PETSc, in serial or in parallel.
 
 The pages under Getting started introduce the concepts one at a time, from
 [a problem in plain UFL](docs/getting_started/01_poisson_in_ufl.py) to
-components, preconditioners and energies.
+components, preconditioners, energy functionals and meshes with named markers.
 
 ```{tableofcontents}
 ```
