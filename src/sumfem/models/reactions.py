@@ -273,24 +273,22 @@ class RateReaction(Residual):
 class Reaction(RateReaction):
     """A reaction ``sum_i nu_i A_i <-> sum_j nu_j B_j`` by mass action.
 
-    By the `law of mass action <https://en.wikipedia.org/wiki/Law_of_mass_action>`_,
-    the reaction runs forward at a rate proportional to the concentration of
-    each reactant raised to its coefficient, and backward at a rate
-    proportional to that of each product raised to its coefficient. The
-    rate ``R`` is the difference, and is negative where the reaction runs
-    backwards::
+    For example, ``3 A + 4 B <-> 4 C``, with ``reactants={A: 3, B: 4}`` and
+    ``products={C: 4}``. By the `law of mass action
+    <https://en.wikipedia.org/wiki/Law_of_mass_action>`_, it runs forward
+    more often the more ``A`` and ``B`` there are, at the rate
+    ``k_f A^3 B^4``, and backward at the rate ``k_b C^4``. Its rate is the
+    difference, negative where it runs backwards::
 
-        R = k_f prod_i A_i^nu_i - k_b prod_j B_j^nu_j
+        R(A, B, C) = k_f A^3 B^4 - k_b C^4
 
-    with the forward and backward rate constants ``k_f`` and ``k_b``.
-
+    with the forward and backward rate constants ``k_f`` and ``k_b``. In
+    general, each reactant and each product is raised to its coefficient.
     The law holds for elementary reactions; for any other rate law, use
     :class:`RateReaction`.
 
-    For example, ``3 A + 4 B <-> 4 C``, ``reactants={A: 3, B: 4}`` and
-    ``products={C: 4}``, has the rate ``R(A, B, C) = k_f A^3 B^4 - k_b C^4``.
-    It enters the equations of the species as in :class:`RateReaction`, and
-    as it depends on all three, it couples them::
+    The rate enters the equations of the species as in
+    :class:`RateReaction`, and as it depends on all three, it couples them::
 
         Dt(A) + ... + 3 R(A, B, C) = 0
         Dt(B) + ... + 4 R(A, B, C) = 0
