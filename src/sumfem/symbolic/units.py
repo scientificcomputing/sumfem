@@ -1,4 +1,5 @@
-"""Dimensional analysis of systems, with ``ufl_units``.
+"""Dimensional analysis of systems, with
+`ufl-units <https://github.com/fenics-dolfiny/ufl-units>`_.
 
 Every equation of a system is analyzed on its own, because different
 equations, say for a potential and for a concentration, have different
@@ -21,6 +22,7 @@ from __future__ import annotations
 
 import dataclasses
 import math
+import typing
 
 import sympy
 import sympy.physics.units as syu
@@ -31,7 +33,14 @@ from ufl_units import InconsistentDimensions, Quantity, QuantityMixin
 from ..error_handling import ComponentError, qualified_name
 from .domains import Domain
 from .system import System
-from .terminals import Field, FieldRole, FieldTerminal, TimeDerivative
+from .terminals import (
+    Field,
+    FieldRole,
+    FieldTerminal,
+    KnownCoefficient,
+    Parameter,
+    TimeDerivative,
+)
 
 __all__ = [
     "PiGroup",
@@ -219,28 +228,130 @@ def equation_scales(system: System, time_scale: float = 1.0) -> dict[str, float]
     return scales
 
 
-def pi_groups(system: System, time_scale: float = 1.0) -> list[PiGroup]:
+Repeating = Field | Domain | Parameter | KnownCoefficient | str
+"""A quantity to build dimensionless groups from: the scale of a field, the
+length scale of a domain, a parameter or known coefficient, or a quantity by
+its symbol, e.g. ``"t_ref"``."""
+
+
+def _symbol(quantity: Repeating) -> str:
+    """The symbol of a quantity in dimensional analysis, see :func:`_mapping`."""
+    if isinstance(quantity, Field):
+        return f"{quantity.name}_ref"
+    if isinstance(quantity, Domain):
+        return f"L_{quantity.name}"
+    if isinstance(quantity, Parameter | KnownCoefficient):
+        return quantity.name
+    return quantity
+
+
+def pi_groups(
+    system: System,
+    time_scale: float = 1.0,
+    repeating: typing.Sequence[Repeating] = (),
+) -> list[PiGroup]:
     """The dimensionless groups of a system, by Buckingham Pi analysis.
+
+    Any product of powers of dimensionless groups is one too, so the groups
+    are not unique. By default, they are a basis of the null space of the
+    dimension matrix, whose form depends on the order in which the
+    quantities appear in the forms. With ``repeating`` quantities, they are
+    those of the method of repeating variables: one group for every other
+    quantity, that quantity times powers of the repeating ones.
 
     Args:
         system: The system.
         time_scale: Reference time in seconds, for time derivatives.
+        repeating: The quantities to build every group from, given by the
+            objects whose scales the analysis uses: a
+            :class:`~sumfem.symbolic.Domain` for its ``length_scale``, a
+            :class:`~sumfem.symbolic.Field` for its ``scale``, a
+            :class:`~sumfem.symbolic.Parameter` or
+            :class:`~sumfem.symbolic.KnownCoefficient` for its value, or a
+            symbol, such as ``"t_ref"`` for ``time_scale``. Choose one for
+            each base dimension of the problem, e.g. the length, the scale of
+            the unknown and a material coefficient: they must be
+            dimensionally independent, and their dimensions must make up
+            those of every other quantity.
+
+    Raises:
+        ComponentError: If a repeating quantity is not one of the system,
+            or the repeating quantities are not dimensionally independent,
+            or do not make up the dimensions of the others.
+
+    Example:
+        In heat conduction ``-div(kappa grad(T)) = q`` on ``domain``, the
+        length scale of the domain, the scale of ``T`` and the conductivity
+        make up the dimensions of the source, in which mass and time only
+        appear together, as kg/s^3. They give one group, of the source::
+
+            pi_groups(system, repeating=[domain, T, kappa])
+            # [PiGroup(expression=L_domain**2*q/(T_ref*kappa), value=...)]
     """
     by_symbol: dict[str, QuantityMixin] = {}
     for field, form in _equations(system):
         quantities, _ = _quantities(field, form, time_scale)
         for quantity in quantities:
             by_symbol.setdefault(str(quantity.symbol), quantity)
-    quantities = list(by_symbol.values())
-    _, _, groups = ufl_units.buckingham_pi_analysis(quantities)
+    if not repeating:
+        quantities = list(by_symbol.values())
+        _, _, groups = ufl_units.buckingham_pi_analysis(quantities)
+        exponents = [[sympy.nsimplify(e) for e in group] for group in groups]
+    else:
+        quantities, exponents = _repeating_groups(
+            by_symbol, [_symbol(q) for q in repeating]
+        )
     result = []
-    for group in groups:
-        exponents = [sympy.nsimplify(e) for e in group]
+    for group in exponents:
         expression = sympy.Mul(
-            *[q.symbol**e for q, e in zip(quantities, exponents, strict=True) if e != 0]
+            *[q.symbol**e for q, e in zip(quantities, group, strict=True) if e != 0]
         )
         value = math.prod(
-            q.factor ** float(e) for q, e in zip(quantities, exponents, strict=True)
+            q.factor ** float(e) for q, e in zip(quantities, group, strict=True)
         )
         result.append(PiGroup(expression, float(value)))
     return result
+
+
+def _repeating_groups(
+    by_symbol: dict[str, QuantityMixin], symbols: list[str]
+) -> tuple[list[QuantityMixin], list[list[sympy.Expr]]]:
+    """The groups of each other quantity with the repeating ones.
+
+    Each group is ``q_j prod(r_i ** a_i)``, with the exponents ``a`` solving
+    ``D_r a = -d_j`` for the dimension matrix ``D_r`` of the repeating
+    quantities and the dimensions ``d_j`` of ``q_j``.
+
+    Returns:
+        The quantities, the repeating ones first, and the exponents of each
+        group in that order.
+    """
+    missing = [s for s in symbols if s not in by_symbol]
+    if missing:
+        raise ComponentError(
+            f"The repeating quantities {missing} are not quantities of the system, "
+            f"{list(by_symbol)}."
+        )
+    others = [s for s in by_symbol if s not in symbols]
+    quantities = [by_symbol[s] for s in symbols + others]
+    matrix, _ = ufl_units.dimension_matrix(quantities)
+    count = len(symbols)
+    repeating = matrix[:, :count]
+    if repeating.rank() != count:
+        raise ComponentError(
+            f"The repeating quantities {symbols} are not dimensionally independent."
+        )
+    if repeating.rank() != matrix.rank():
+        raise ComponentError(
+            f"The dimensions of the repeating quantities {symbols} do not make up "
+            "those of the others, which then form no group with them."
+        )
+    exponents = []
+    for j in range(count, len(quantities)):
+        solution, _ = repeating.gauss_jordan_solve(-matrix[:, j])
+        group = [sympy.nsimplify(e) for e in solution] + [sympy.Integer(0)] * len(
+            others
+        )
+        group[j] = sympy.Integer(1)
+        exponents.append(group)
+    return quantities, exponents

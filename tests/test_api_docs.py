@@ -31,6 +31,8 @@ def documented(page: pathlib.Path) -> set[str]:
         ("sumfem.solvers", "solvers"),
         ("sumfem.solvers.solver", "solvers"),
         ("sumfem.post_processing", "post_processing"),
+        ("sumfem.plotting", "plotting"),
+        ("sumfem.models", "models"),
     ],
 )
 def test_every_public_name_is_on_its_api_page(module, page):

@@ -10,6 +10,11 @@ parts:
       - file: "docs/getting_started/03_preconditioners.py"
       - file: "docs/getting_started/04_energy_functionals.py"
       - file: "docs/getting_started/05_mesh_data.py"
+  - caption: "Tutorials"
+    chapters:
+      - file: "docs/tutorials/03_units.py"
+      - file: "docs/tutorials/06_jacobians_and_functionals.py"
+      - file: "docs/tutorials/11_lagrange_multipliers.py"
   - caption: "Python API"
     chapters:
       - file: "docs/api/index"
@@ -18,3 +23,5 @@ parts:
           - file: "docs/api/discrete"
           - file: "docs/api/solvers"
           - file: "docs/api/post_processing"
+          - file: "docs/api/plotting"
+          - file: "docs/api/models"

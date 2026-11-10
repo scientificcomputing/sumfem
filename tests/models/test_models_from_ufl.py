@@ -1,0 +1,289 @@
+"""Each model of sumfem.models against its formulation in plain UFL.
+
+Each test writes a model's terms as the UFL file of a DOLFINx C++ demo would,
+turns them into a ``UFLResidual``, and compares it with the model on fields of
+its own. Both are discretized on the same mesh data, so the fields have the
+same layout and the random data of one is copied to the other: the assembled
+residual, Jacobian and preconditioner agree to machine precision.
+"""
+
+import numpy as np
+import pytest
+import sympy.physics.units as syu
+import ufl
+from basix.ufl import element
+
+from sumfem.discrete import Discretization, DomainMaps, discretize
+from sumfem.models import (
+    BoundaryConstraint,
+    BoundaryFlux,
+    Diffusion,
+    DirichletMultiplier,
+    Outflow,
+    Poisson,
+    RateReaction,
+    Reaction,
+    Source,
+    arrhenius,
+)
+from sumfem.symbolic import BOLTZMANN, Domain, Field, UFLResidual, boltzmann_constant
+from sumfem.symbolic.si import to_si
+
+CELLS = ["interval", "triangle", "quadrilateral", "tetrahedron", "hexahedron"]
+"""The cell types each comparison runs on."""
+
+DOMAIN = "box"
+"""The name of the symbolic domain of both formulations.
+
+The plain forms name their mesh so with ``names``, the models create their
+domain with it, and ``DomainMaps`` binds the mesh data to the domain by it.
+"""
+
+
+def assign_random_data(disc: Discretization, field: Field, seed: int) -> None:
+    """Set a field to random values, so that nonlinear terms are exercised."""
+    function = disc.function(field)
+    rng = np.random.default_rng(seed=seed + 100 * disc.comm.rank)
+    function.x.array[:] = rng.uniform(0.5, 1.5, function.x.array.size)
+    function.x.scatter_forward()
+
+
+def compare(plain, plain_fields, model, fields, mesh_data, same_assembly, values=()):
+    """Discretize both on the same mesh data, at the same random values.
+
+    Args:
+        plain: The ``UFLResidual``.
+        plain_fields: Its fields, in the order of ``fields``.
+        model: The model.
+        fields: The model's fields.
+        mesh_data: The mesh data of both.
+        same_assembly: The fixture.
+        values: Parameter values of each, as pairs of mappings ``(plain, model)``.
+    """
+    disc_plain = discretize([plain], DomainMaps({DOMAIN: mesh_data}))
+    disc_model = discretize([model], DomainMaps({DOMAIN: mesh_data}))
+    for plain_values, model_values in values:
+        disc_plain.set(plain_values)
+        disc_model.set(model_values)
+    for seed, (plain_field, field) in enumerate(zip(plain_fields, fields, strict=True)):
+        assign_random_data(disc_plain, plain_field, seed)
+        values_of_plain = disc_plain.function(plain_field).x.array
+        disc_model.function(field).x.array[:] = values_of_plain
+    same_assembly(disc_model[model], disc_plain[plain])
+
+
+@pytest.mark.parametrize("coefficient", ["parameter", "matrix", "nonlinear"])
+@pytest.mark.parametrize("cell", CELLS)
+def test_diffusion(cell, coefficient, ufl_functionspace, box, same_assembly):
+    """Diffusion with a scalar parameter, a matrix, or a coefficient of the
+    field, restricted to the cells of a marker.
+    """
+    mesh, V = ufl_functionspace(cell, degree=2)
+    gdim = ufl.Cell(cell).topological_dimension
+    uh, v = ufl.Coefficient(V), ufl.TestFunction(V)
+    kappa = ufl.Constant(mesh)
+    matrix = ufl.as_matrix(
+        [[2.0 + i + j if i == j else 0.5 for j in range(gdim)] for i in range(gdim)]
+    )
+    k = {"parameter": kappa, "matrix": matrix, "nonlinear": 1 + uh**2}[coefficient]
+    grad = ufl.dot(k, ufl.grad(uh)) if coefficient == "matrix" else k * ufl.grad(uh)
+    F = ufl.inner(grad, ufl.grad(v)) * ufl.dx(1)
+    plain = UFLResidual(
+        "plain",
+        F,
+        uh,
+        names={DOMAIN: mesh, "kappa": kappa},
+        markers={"dx": {1: "LeftHalf"}},
+    )
+
+    u = Field("u", Domain(DOMAIN, cell), ("Lagrange", 2))
+    model_k = {"parameter": None, "matrix": matrix, "nonlinear": 1 + u**2}[coefficient]
+    model = Diffusion("d", u, model_k, markers=("LeftHalf",))
+    is_parameter = coefficient == "parameter"
+    values = [({"plain.kappa": 2.5}, {"d.coefficient": 2.5})] if is_parameter else []
+    compare(plain, [plain.field], model, [u], box(cell), same_assembly, values)
+
+
+@pytest.mark.parametrize("cell", CELLS)
+def test_source_of_a_vector_field(cell, ufl_functionspace, box, same_assembly):
+    """A source of a vector field, a vector parameter by default, with diffusion:
+    a source alone does not depend on the field, so its Jacobian is empty.
+    """
+    gdim = ufl.Cell(cell).topological_dimension
+    mesh, V = ufl_functionspace(cell, degree=1, shape=(gdim,))
+    uh, v = ufl.Coefficient(V), ufl.TestFunction(V)
+    f = ufl.Constant(mesh, shape=(gdim,))
+    F = ufl.inner(ufl.grad(uh), ufl.grad(v)) * ufl.dx - ufl.inner(f, v) * ufl.dx
+    plain = UFLResidual("plain", F, uh, names={DOMAIN: mesh, "f": f})
+
+    u = Field("u", Domain(DOMAIN, cell), ("Lagrange", 1, (gdim,)))
+    model = Diffusion("d", u, 1.0) + Source("s", u)
+    value = np.arange(1.0, gdim + 1.0)
+    values = [({"plain.f": value}, {"s.source": value})]
+    compare(plain, [plain.field], model, [u], box(cell), same_assembly, values)
+
+
+@pytest.mark.parametrize("cell", CELLS)
+def test_poisson(cell, ufl_functionspace, box, same_assembly):
+    """Poisson's equation, with its coefficient one by default and a source
+    that depends on the coordinates.
+    """
+    mesh, V = ufl_functionspace(cell, degree=2)
+    uh, v = ufl.Coefficient(V), ufl.TestFunction(V)
+    xh = ufl.SpatialCoordinate(mesh)
+    F = ufl.inner(ufl.grad(uh), ufl.grad(v)) * ufl.dx - ufl.sin(3 * xh[0]) * v * ufl.dx
+    plain = UFLResidual("plain", F, uh, names={DOMAIN: mesh})
+
+    domain = Domain(DOMAIN, cell)
+    u = Field("u", domain, ("Lagrange", 2))
+    x = ufl.SpatialCoordinate(domain)
+    model = Poisson("p", u, source=ufl.sin(3 * x[0]))
+    compare(plain, [plain.field], model, [u], box(cell), same_assembly)
+
+
+@pytest.mark.parametrize("cell", CELLS)
+def test_boundary_flux_and_outflow(cell, ufl_functionspace, box, same_assembly):
+    """A flux into the domain through one side, and advection out of another,
+    on the facets of their markers.
+    """
+    gdim = ufl.Cell(cell).topological_dimension
+    mesh, V = ufl_functionspace(cell)
+    ch, v = ufl.Coefficient(V), ufl.TestFunction(V)
+    q = ufl.Constant(mesh)
+    n = ufl.FacetNormal(mesh)
+    velocity = ufl.as_vector([1.0 + i for i in range(gdim)])
+    ds = ufl.Measure("ds", mesh)
+    F = -q * v * ds(1) + ufl.dot(velocity, n) * ch * v * ds(2)
+    plain = UFLResidual(
+        "plain",
+        F,
+        ch,
+        names={DOMAIN: mesh, "q": q},
+        markers={"ds": {1: "Left", 2: "Right"}},
+    )
+
+    c = Field("c", Domain(DOMAIN, cell), ("Lagrange", 1))
+    inflow = BoundaryFlux("in", c, 2.0, markers=("Left",))
+    model = inflow + Outflow("out", c, velocity, markers=("Right",))
+    values = [({"plain.q": 2.0}, {})]
+    compare(plain, [plain.field], model, [c], box(cell), same_assembly, values)
+
+
+@pytest.mark.parametrize("cell", CELLS)
+def test_dirichlet_multiplier(cell, ufl_functionspace, box, same_assembly):
+    """A Dirichlet condition with a Lagrange multiplier, the two fields on a
+    mixed space, the multiplier here on the whole mesh.
+    """
+    mesh, V = ufl_functionspace(cell)
+    Q = ufl.FunctionSpace(mesh, element("Lagrange", cell, 1))
+    W = ufl.MixedFunctionSpace(V, Q)
+    uh, lh = ufl.Coefficient(V), ufl.Coefficient(Q)
+    v, mu = ufl.TestFunctions(W)
+    g = ufl.Constant(mesh)
+    ds = ufl.Measure("ds", mesh)
+    F = ufl.inner(lh, v) * ds(1) + ufl.inner(uh - g, mu) * ds(1)
+    plain = UFLResidual(
+        "plain",
+        F,
+        [uh, lh],
+        names={DOMAIN: mesh, "u": uh, "lambda": lh, "g": g},
+        markers={"ds": {1: "Left"}},
+    )
+
+    domain = Domain(DOMAIN, cell)
+    u = Field("u", domain, ("Lagrange", 1))
+    lam = Field("lambda", domain, ("Lagrange", 1))
+    model = DirichletMultiplier("m", u, lam, markers=("Left",))
+    values = [({"plain.g": 0.5}, {"m.value": 0.5})]
+    compare(plain, plain.unknowns, model, [u, lam], box(cell), same_assembly, values)
+
+
+@pytest.mark.parametrize("constraint", ["normal", "nonlinear"])
+@pytest.mark.parametrize("cell", CELLS)
+def test_boundary_constraint(cell, constraint, ufl_functionspace, box, same_assembly):
+    """A constraint with a Lagrange multiplier of its own shape: the normal
+    component of a vector field, or a nonlinear constraint of a scalar one,
+    whose derivative enters the equation of the field.
+    """
+    gdim = ufl.Cell(cell).topological_dimension
+    shape = (gdim,) if constraint == "normal" else ()
+    mesh, V = ufl_functionspace(cell, degree=1, shape=shape)
+    Q = ufl.FunctionSpace(mesh, element("Lagrange", cell, 1))
+    W = ufl.MixedFunctionSpace(V, Q)
+    uh, lh = ufl.Coefficient(V), ufl.Coefficient(Q)
+    v, mu = ufl.TestFunctions(W)
+    g = ufl.Constant(mesh)
+    n = ufl.FacetNormal(mesh)
+    ds = ufl.Measure("ds", mesh)
+    if constraint == "normal":
+        c, dc = ufl.dot(uh, n) - g, ufl.dot(v, n)
+    else:
+        c, dc = uh**2 - g, 2 * uh * v
+    F = lh * dc * ds(1) + c * mu * ds(1)
+    names = {DOMAIN: mesh, "u": uh, "lambda": lh, "g": g}
+    plain = UFLResidual("plain", F, [uh, lh], names=names, markers={"ds": {1: "Left"}})
+
+    domain = Domain(DOMAIN, cell)
+    u = Field("u", domain, ("Lagrange", 1, shape))
+    lam = Field("lambda", domain, ("Lagrange", 1))
+    n_model = ufl.FacetNormal(domain)
+    model_c = ufl.dot(u, n_model) - 0.5 if constraint == "normal" else u**2 - 0.5
+    model = BoundaryConstraint("c", u, lam, model_c, markers=("Left",))
+    values = [({"plain.g": 0.5}, {})]
+    compare(plain, plain.unknowns, model, [u, lam], box(cell), same_assembly, values)
+
+
+@pytest.mark.parametrize("reaction", ["mass action", "rate"])
+@pytest.mark.parametrize("cell", CELLS)
+def test_reactions(cell, reaction, ufl_functionspace, box, same_assembly):
+    """``A + 2 B <-> C``: each species gets its coefficient times the rate in
+    its equation, reactants with a plus and products with a minus sign.
+    """
+    mesh, V = ufl_functionspace(cell)
+    W = ufl.MixedFunctionSpace(V, V, V)
+    ah, bh, ch = ufl.Coefficient(V), ufl.Coefficient(V), ufl.Coefficient(V)
+    va, vb, vc = ufl.TestFunctions(W)
+    kf = ufl.Constant(mesh)
+    kb = 0.3
+    if reaction == "mass action":
+        R = kf * ah * bh**2 - kb * ch
+    else:
+        # A rate of every species, so no block of the Jacobian is empty
+        R = kf * ah * ufl.exp(-bh) - kb * ch**2
+    F = R * (va + 2 * vb - vc) * ufl.dx
+    names = {DOMAIN: mesh, "A": ah, "B": bh, "C": ch, "kf": kf}
+    plain = UFLResidual("plain", F, [ah, bh, ch], names=names)
+
+    domain = Domain(DOMAIN, cell)
+    a, b, c = (Field(name, domain, ("Lagrange", 1)) for name in "ABC")
+    reactants, products = {a: 1, b: 2}, {c: 1}
+    if reaction == "mass action":
+        model = Reaction("r", reactants, products, backward_rate=kb)
+        values = [({"plain.kf": 1.7}, {"r.forward_rate": 1.7})]
+    else:
+        model = RateReaction(
+            "r", reactants, products, rate=1.7 * a * ufl.exp(-b) - kb * c**2
+        )
+        values = [({"plain.kf": 1.7}, {})]
+    compare(plain, plain.unknowns, model, [a, b, c], box(cell), same_assembly, values)
+
+
+def test_arrhenius_is_the_arrhenius_law():
+    """``k_0 exp(-E / (k_B T))``, with the Boltzmann constant in J/K by default.
+
+    For a temperature without a domain, a number, it is its SI value; on a
+    domain, the parameter of :func:`boltzmann_constant` there, so units are
+    checked.
+    """
+    k_B = to_si(BOLTZMANN, syu.joule / syu.kelvin)
+    assert k_B == 1.380649e-23
+    rate = arrhenius(2.0, 0.5 * k_B * 300.0, 300.0)
+    assert float(rate) == pytest.approx(2.0 * np.exp(-0.5))
+    domain = Domain("bar", "interval")
+    T = Field("T", domain, ("Lagrange", 1), unit=syu.kelvin)
+    on_domain = arrhenius(2.0, 1e-20, T)
+    parameter = boltzmann_constant(domain)
+    assert parameter in ufl.algorithms.extract_coefficients(on_domain)
+    assert parameter.name == "bar.k_B" and boltzmann_constant(domain) is parameter
+    in_ev = arrhenius(2.0, 0.1, 300.0, boltzmann=8.617333262e-5)
+    assert float(in_ev) == pytest.approx(2.0 * np.exp(-0.1 / (8.617333262e-5 * 300.0)))

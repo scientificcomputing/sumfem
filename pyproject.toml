@@ -20,18 +20,21 @@ dependencies = [
     "fenics-dolfinx>=0.12.0.dev0",
     "numpy",
     "sympy",
-    # Not yet on PyPI. It blocks publishing sumfem to PyPI until released there.
-    # A git reference takes no version bound, so the tag of the oldest supported
-    # release stands for ">=1.0.0" until then.
-    "ufl-units @ git+https://github.com/fenics-dolfiny/ufl-units@v1.0.0",
+    "ufl-units>=1.0.0",
 ]
 
 
 [project.optional-dependencies]
-test = ["pytest", "sympy", "jax", "scifem", "gmsh"]
+test = ["pytest", "sympy", "jax", "scifem", "gmsh", "pyvista"]
 examples = ["matplotlib", "scipy", "gmsh"]
 dev = ["pdbpp", "ipython", "mypy", "ruff"]
-docs = ["sumfem[examples]", "jupyter-book<2", "jupytext", "sphinx-codeautolink"]
+docs = [
+    "sumfem[examples]",
+    "jupyter-book<2",
+    "jupytext",
+    "sphinx-codeautolink",
+    "pyvista",
+]
 jupyter = ["trame_jupyter_extension", "trame", "pyvista[all]>=0.45.0"]
 all = [
     "sumfem[test]",

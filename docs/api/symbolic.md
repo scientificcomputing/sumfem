@@ -137,6 +137,10 @@
    :members:
 
 .. autoexception:: UnitError
+
+.. autodata:: BOLTZMANN
+
+.. autofunction:: boltzmann_constant
 ```
 
 ## Errors

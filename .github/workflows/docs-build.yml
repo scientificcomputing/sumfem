@@ -46,6 +46,12 @@ jobs:
       - name: Load the Open MPI settings
         run: grep -v '^#' .github/workflows/openmpi.env >> "$GITHUB_ENV"
 
+      - name: Install the libraries of off-screen rendering
+        # VTK, under PyVista, renders with OSMesa where there is no display
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends libosmesa6 libgl1 libxrender1
+
       - name: Install sumfem with its test and documentation dependencies
         id: install
         run: python3 -m pip install -e .[test,docs] --no-build-isolation

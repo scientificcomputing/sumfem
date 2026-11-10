@@ -397,7 +397,12 @@ class Residual(Component):
         )
 
     def with_jacobian(self, jacobian: Jacobian) -> Residual:
-        """This residual, linearized by the given Jacobian."""
+        """This residual, linearized by the given Jacobian.
+
+        It replaces the whole Jacobian of this residual: of every summand of
+        a sum, hand-written or derived. To replace the Jacobian of one
+        summand only, attach it to that summand before summing.
+        """
         return _Linearized(self, jacobian=jacobian)
 
     def with_preconditioner(self, preconditioner: Jacobian) -> Residual:

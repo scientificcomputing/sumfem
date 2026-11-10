@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import itertools
 import typing
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 
 from mpi4py import MPI
 
@@ -18,9 +18,11 @@ import numpy as np
 from .. import symbolic
 from ..discrete import bcs as discrete_bcs
 from ..discrete import system as discrete_system
+from ..symbolic.si import si_factor
 
 __all__ = [
     "DEFAULT_PETSC_OPTIONS",
+    "FACTORIZED_ABSOLUTE_TOLERANCES",
     "FACTORIZED_PETSC_OPTIONS",
     "NEWTON_TOLERANCES",
     "Solver",
@@ -54,12 +56,25 @@ _WITHOUT_LINE_SEARCH = frozenset(
 )
 """SNES types that use no line search, for which the default one is dropped."""
 
-FACTORIZED_PETSC_OPTIONS: Mapping[str, typing.Any] = {"snes_stol": 0.0}
+FACTORIZED_ABSOLUTE_TOLERANCES: Mapping[np.dtype, float] = {
+    np.dtype(np.float64): 1e-10,
+    np.dtype(np.float32): 1e-3,
+}
+"""Newton's absolute tolerance for factorized equations, in each precision
+of PETSc's real type. Their residuals are dimensionless, of size one, and
+stall at round-off some thousand machine epsilons above zero, so the
+absolute tolerance is well above that."""
+
+FACTORIZED_PETSC_OPTIONS: Mapping[str, typing.Any] = {
+    "snes_stol": 0.0,
+    "snes_atol": FACTORIZED_ABSOLUTE_TOLERANCES[np.dtype(dolfinx.default_real_type)],
+}
 """Defaults for factorized equations, on top of :data:`DEFAULT_PETSC_OPTIONS`.
 
-Their residuals are dimensionless, so Newton converges on the residual
-alone. The step-size test is off, since it compares the update with the
-solution over all unknowns at once, in SI values of different magnitudes."""
+Their residuals are dimensionless, and so are the unknowns that Newton
+iterates on, see :class:`Solver`, so Newton converges on the residual alone,
+with the absolute tolerance of :data:`FACTORIZED_ABSOLUTE_TOLERANCES`, and
+the step-size test is off."""
 
 # Unique PETSc options prefixes for solvers created without one
 _prefix_counter = itertools.count()
@@ -101,6 +116,124 @@ def direct_solver_options(comm: MPI.Intracomm) -> dict[str, typing.Any]:
     )
 
 
+def _like(vector: PETSc.Vec, value: float = 0.0) -> PETSc.Vec:
+    """A vector of the layout of ``vector``, ghosts and blocks included."""
+    result = vector.duplicate()
+    layout = vector.getAttr("_blocks")
+    if layout is not None:
+        result.setAttr("_blocks", layout)
+    result.set(value)
+    return result
+
+
+def _unknown_scales(
+    problem: dolfinx.fem.petsc.NonlinearProblem, scales: Sequence[float]
+) -> PETSc.Vec:
+    """The SI scale of its unknown on each degree of freedom.
+
+    Args:
+        problem: The problem, whose unknowns are in block order.
+        scales: The SI scale of each unknown.
+    """
+    u = problem.u
+    functions = list(u) if isinstance(u, Sequence) else [u]
+    filled = []
+    for function, scale in zip(functions, scales, strict=True):
+        constant = dolfinx.fem.Function(function.function_space)
+        constant.x.array[:] = scale
+        filled.append(constant)
+    result = _like(problem.b)
+    dolfinx.fem.petsc.assign(filled if isinstance(u, Sequence) else filled[0], result)
+    return result
+
+
+def _dirichlet_row_scaling(
+    problem: dolfinx.fem.petsc.NonlinearProblem,
+    bcs: Sequence[dolfinx.fem.DirichletBC],
+    scales: Sequence[float],
+) -> PETSc.Vec:
+    """One over the SI scale of its unknown on each constrained row, one on
+    the others.
+
+    The rows are found by :func:`dolfinx.fem.petsc.set_bc` itself, so any
+    layout of the problem, single, blocked or nested, is covered: setting
+    ``g - x0`` with ``x0 = g`` zeroes exactly the constrained rows of a
+    vector of ones.
+
+    Args:
+        problem: The problem, whose unknowns are in block order.
+        bcs: The Dirichlet conditions.
+        scales: The SI scale of each unknown.
+    """
+    blocked = isinstance(problem.F, Sequence)
+    if blocked:
+        spaces: typing.Any = dolfinx.fem.extract_function_spaces(problem.F)
+        by_block = dolfinx.fem.bcs_by_block(spaces, bcs)
+    else:
+        by_block = [list(bcs)]
+    rows, values, free = _like(problem.b, 1.0), _like(problem.b), _like(problem.b)
+    for block, scale in enumerate(scales):
+        conditions: typing.Any = (
+            [c if b == block else [] for b, c in enumerate(by_block)]
+            if blocked
+            else by_block[0]
+        )
+        values.set(0.0)
+        dolfinx.fem.petsc.set_bc(values, conditions)
+        free.set(1.0)
+        dolfinx.fem.petsc.set_bc(free, conditions, x0=values)
+        # One minus free is exactly one on the constrained rows of the
+        # block and zero elsewhere, so the rows there go from one to 1 / X
+        # without the round-off of adding 1 / X - 1 to one
+        free.scale(-1.0)
+        free.shift(1.0)
+        rows.axpy(-1.0, free)
+        rows.axpy(1.0 / scale, free)
+    for work in (values, free):
+        work.destroy()
+    return rows
+
+
+def _scale_unknowns(
+    problem: dolfinx.fem.petsc.NonlinearProblem, scales: PETSc.Vec, rows: PETSc.Vec
+) -> None:
+    """Let Newton iterate on the unknowns divided by their scales.
+
+    The SNES iterate is then ``x / X``, from which the residual and the
+    Jacobian are assembled at ``x``. The columns of the Jacobian are
+    multiplied by ``X``, and the rows of the residual and the Jacobian by
+    ``rows``: DOLFINx sets a constrained row to ``x - g`` and the identity,
+    in SI values, which ``rows`` divides by ``X``. The Newton update is the
+    same, since the system is only scaled, but every entry is now of the
+    size of the factorized equations, and so are the norms of the residual
+    and of the step.
+    """
+    # petsc4py's type hints do not cover the callbacks the getters return
+    snes: typing.Any = problem.solver
+    vector, (residual, residual_args, residual_kargs) = snes.getFunction()
+    matrix, preconditioner, (jacobian, jacobian_args, jacobian_kargs) = (
+        snes.getJacobian()
+    )
+    si = _like(problem.b)
+
+    def scaled_residual(snes_: PETSc.SNES, x: PETSc.Vec, b: PETSc.Vec) -> None:
+        si.pointwiseMult(x, scales)
+        residual(snes_, si, b, *residual_args, **residual_kargs)
+        b.pointwiseMult(b, rows)
+
+    def scaled_jacobian(
+        snes_: PETSc.SNES, x: PETSc.Vec, J: PETSc.Mat, P: PETSc.Mat
+    ) -> None:
+        si.pointwiseMult(x, scales)
+        jacobian(snes_, si, J, P, *jacobian_args, **jacobian_kargs)
+        J.diagonalScale(L=rows, R=scales)
+        if P is not None and P.handle != J.handle:
+            P.diagonalScale(L=rows, R=scales)
+
+    snes.setFunction(scaled_residual, vector)
+    snes.setJacobian(scaled_jacobian, matrix, preconditioner)
+
+
 class Solver:
     """Solve a :class:`~sumfem.discrete.system.System`.
 
@@ -121,6 +254,15 @@ class Solver:
     Symbolic boundary values are evaluated before every solve and every
     Newton iteration, so they follow parameters, time and known coefficients, as
     in Irksome's DOLFINx backend.
+
+    For factorized equations, Newton iterates on the unknowns divided by their
+    scales, in SI, and the rows of the Dirichlet conditions are divided by the
+    scale of their unknown, so that the whole system is dimensionless: the
+    residual, the step and every entry of the Jacobian are of size one. The
+    Newton update is the same; the norms that stop Newton are not, nor are the
+    pivots of an LU factorization. The functions of the unknowns hold SI values
+    before and after a solve, which must go through :meth:`solve`, not the
+    :attr:`nonlinear_problem`.
     """
 
     _system: discrete_system.System
@@ -131,6 +273,10 @@ class Solver:
 
     _nonlinear_problem: dolfinx.fem.petsc.NonlinearProblem
     """The DOLFINx problem holding the PETSc objects."""
+
+    _unknown_scales: PETSc.Vec | None
+    """The SI scale of its unknown on each degree of freedom, for factorized
+    equations, by which Newton's iterate is divided."""
 
     def __init__(
         self,
@@ -191,6 +337,18 @@ class Solver:
             petsc_options=options,
             kind=kind,
         )
+        # Newton iterates on unknowns divided by their scales when the
+        # equations are, see _scale_unknowns
+        self._unknown_scales = None
+        if symbolic_system.equation_scales:
+            scales = [
+                field.scale * si_factor(field.unit)
+                for field in symbolic_system.unknowns
+            ]
+            problem = self._nonlinear_problem
+            self._unknown_scales = _unknown_scales(problem, scales)
+            rows = _dirichlet_row_scaling(problem, self._dolfinx_bcs, scales)
+            _scale_unknowns(problem, self._unknown_scales, rows)
         if any(bc.expression is not None for bc in self._bcs):
             # The callback must not refer to the solver: the cycle through
             # the SNES would leave the PETSc objects to the garbage
@@ -206,7 +364,11 @@ class Solver:
 
     @property
     def nonlinear_problem(self) -> dolfinx.fem.petsc.NonlinearProblem:
-        """The DOLFINx problem, giving access to the PETSc objects."""
+        """The DOLFINx problem, giving access to the PETSc objects.
+
+        For factorized equations, its SNES iterates on scaled unknowns, see
+        :class:`Solver`.
+        """
         return self._nonlinear_problem
 
     @property
@@ -254,7 +416,19 @@ class Solver:
         system = self._system
         system.discretization.check_values(system.symbolic)
         self.pack_bcs()
-        self._nonlinear_problem.solve()
+        problem = self._nonlinear_problem
+        scales = self._unknown_scales
+        if scales is None:
+            problem.solve()
+        else:
+            u = problem.u
+            dolfinx.fem.petsc.assign(u, problem.x)
+            problem.x.pointwiseDivide(problem.x, scales)
+            problem.solver.solve(None, problem.x)
+            problem.x.pointwiseMult(problem.x, scales)
+            dolfinx.fem.petsc.assign(problem.x, u)
+            for function in system.solution:
+                function.x.scatter_forward()
         return system.solution
 
 
