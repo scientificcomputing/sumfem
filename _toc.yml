@@ -5,6 +5,16 @@ parts:
   - caption: "Getting started"
     chapters:
       - file: "docs/installation"
+      - file: "docs/getting_started/01_poisson_in_ufl.py"
+      - file: "docs/getting_started/02_components.py"
+      - file: "docs/getting_started/03_preconditioners.py"
+      - file: "docs/getting_started/04_energy_functionals.py"
+      - file: "docs/getting_started/05_mesh_data.py"
   - caption: "Python API"
     chapters:
-      - file: "docs/api"
+      - file: "docs/api/index"
+        sections:
+          - file: "docs/api/symbolic"
+          - file: "docs/api/discrete"
+          - file: "docs/api/solvers"
+          - file: "docs/api/post_processing"

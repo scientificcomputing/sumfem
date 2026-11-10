@@ -15,9 +15,9 @@ import dolfinx.fem
 import dolfinx.fem.petsc
 import numpy as np
 
+from .. import symbolic
 from ..discrete import bcs as discrete_bcs
 from ..discrete import system as discrete_system
-from ..symbolic.bcs import DirichletBC
 
 __all__ = [
     "DEFAULT_PETSC_OPTIONS",
@@ -48,6 +48,11 @@ DEFAULT_PETSC_OPTIONS: Mapping[str, typing.Any] = {
 """Newton's method with a direct LU solve, raising if it fails to converge.
 Options passed to :class:`Solver` are applied on top. The LU package is
 chosen by :func:`direct_solver_options`, unless the options name one."""
+
+_WITHOUT_LINE_SEARCH = frozenset(
+    {"ksponly", "ksptransposeonly", "newtontr", "newtontrdc"}
+)
+"""SNES types that use no line search, for which the default one is dropped."""
 
 FACTORIZED_PETSC_OPTIONS: Mapping[str, typing.Any] = {"snes_stol": 0.0}
 """Defaults for factorized equations, on top of :data:`DEFAULT_PETSC_OPTIONS`.
@@ -130,21 +135,21 @@ class Solver:
     def __init__(
         self,
         system: discrete_system.System,
-        bcs: Iterable[DirichletBC | dolfinx.fem.DirichletBC] = (),
+        bcs: Iterable[symbolic.DirichletBC | dolfinx.fem.DirichletBC] = (),
         petsc_options: Mapping[str, typing.Any] | None = None,
         petsc_options_prefix: str | None = None,
         kind: str | None = None,
     ):
-        symbolic = system.symbolic
+        symbolic_system = system.symbolic
         discretized: list[discrete_bcs.DirichletBC] = []
         dolfinx_bcs: list[dolfinx.fem.DirichletBC] = []
         for bc in bcs:
-            if isinstance(bc, DirichletBC):
-                if not any(bc.field is f for f in symbolic.unknowns):
+            if isinstance(bc, symbolic.DirichletBC):
+                if not any(bc.field is f for f in symbolic_system.unknowns):
                     raise ValueError(
                         f"The boundary condition on {bc.field.name!r} is not on a "
                         "field this system solves for, "
-                        f"{[f.name for f in symbolic.unknowns]}."
+                        f"{[f.name for f in symbolic_system.unknowns]}."
                     )
                 discrete_bc = discrete_bcs.DirichletBC(system.discretization, bc)
                 discretized.append(discrete_bc)
@@ -156,12 +161,17 @@ class Solver:
         self._dolfinx_bcs = tuple(dolfinx_bcs)
         if petsc_options_prefix is None:
             petsc_options_prefix = f"sumfem_{next(_prefix_counter)}_"
-        blocked = symbolic.blocked
+        blocked = symbolic_system.blocked
         options = {
             **DEFAULT_PETSC_OPTIONS,
-            **(FACTORIZED_PETSC_OPTIONS if symbolic.equation_scales else {}),
+            **(FACTORIZED_PETSC_OPTIONS if symbolic_system.equation_scales else {}),
             **(petsc_options or {}),
         }
+        # Only a line search method reads the default line search: PETSc
+        # reports it as unused otherwise
+        line_search_given = "snes_linesearch_type" in (petsc_options or {})
+        if options["snes_type"] in _WITHOUT_LINE_SEARCH and not line_search_given:
+            options.pop("snes_linesearch_type", None)
         # Only an LU solve needs a package, which the caller may have chosen
         if (
             options.get("pc_type") == "lu"

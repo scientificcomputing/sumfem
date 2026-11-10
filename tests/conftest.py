@@ -9,11 +9,14 @@ import types
 
 from mpi4py import MPI
 
+from petsc4py import PETSc
+
 import dolfinx.fem.petsc
 import dolfinx.mesh
 import numpy as np
 import pytest
 import ufl
+from basix.ufl import element
 
 from sumfem.discrete import MeshData
 from sumfem.symbolic import Domain, Field, Residual
@@ -138,37 +141,136 @@ def domain():
     return Domain("cell", "triangle")
 
 
-def unit_square(cell: str = "triangle", n: int = 4) -> MeshData:
-    """A unit square with markers for its sides and its left and right halves."""
-    mesh = dolfinx.mesh.create_unit_square(
-        MPI.COMM_WORLD, n, n, cell_type=dolfinx.mesh.to_type(cell)
-    )
+def create_unit_box(cell: str = "triangle", n: int = 4) -> MeshData:
+    """A unit interval, square or cube with markers for sides and halves.
+
+    The cell type decides the dimension. The cells are marked ``"LeftHalf"``
+    and ``"RightHalf"``, and the sides normal to x ``"Left"`` and ``"Right"``.
+    A square or cube also has the sides normal to y, ``"Bottom"`` and
+    ``"Top"``, so ``SIDES`` are all sides of a square and four of a cube.
+    ``markers[tdim - 1]`` of the result names the sides marked.
+    """
+    cell_type = dolfinx.mesh.to_type(cell)
+    tdim = dolfinx.mesh.cell_dim(cell_type)
+    if tdim == 1:
+        mesh = dolfinx.mesh.create_unit_interval(MPI.COMM_WORLD, n)
+    elif tdim == 2:
+        mesh = dolfinx.mesh.create_unit_square(MPI.COMM_WORLD, n, n, cell_type)
+    else:
+        mesh = dolfinx.mesh.create_unit_cube(MPI.COMM_WORLD, n, n, n, cell_type)
     eps = 1e-10
+    sides = {
+        "Left": lambda x: np.isclose(x[0], 0.0),
+        "Right": lambda x: np.isclose(x[0], 1.0),
+    }
+    if tdim > 1:
+        # On an interval x[1] is 0 everywhere, so these would mark both ends
+        sides["Bottom"] = lambda x: np.isclose(x[1], 0.0)
+        sides["Top"] = lambda x: np.isclose(x[1], 1.0)
     return MeshData.from_locators(
         mesh,
         {
-            2: {
+            tdim: {
                 "LeftHalf": lambda x: x[0] <= 0.5 + eps,
                 "RightHalf": lambda x: x[0] >= 0.5 - eps,
             },
-            1: {
-                "Left": lambda x: np.isclose(x[0], 0.0),
-                "Right": lambda x: np.isclose(x[0], 1.0),
-                "Bottom": lambda x: np.isclose(x[1], 0.0),
-                "Top": lambda x: np.isclose(x[1], 1.0),
-            },
+            tdim - 1: sides,
         },
         boundary=True,
     )
 
 
+def create_ufl_functionspace(
+    cell: str = "triangle", degree: int = 1, shape: tuple[int, ...] = ()
+) -> tuple[ufl.Mesh, ufl.FunctionSpace]:
+    """A plain UFL mesh and a Lagrange space on it, as a DOLFINx C++ demo has them.
+
+    The mesh has the dimension of the cell.
+    """
+    gdim = ufl.Cell(cell).topological_dimension
+    mesh = ufl.Mesh(element("Lagrange", cell, 1, shape=(gdim,)))
+    return mesh, ufl.FunctionSpace(mesh, element("Lagrange", cell, degree, shape=shape))
+
+
+@pytest.fixture
+def ufl_functionspace():
+    """Factory for plain UFL meshes and spaces, see :func:`create_ufl_functionspace`."""
+    return create_ufl_functionspace
+
+
 @pytest.fixture
 def square():
-    """Factory for unit squares with side and half markers, see :func:`unit_square`."""
-    return unit_square
+    """Factory for unit squares with side and half markers.
+
+    See :func:`create_unit_box`.
+    """
+    return create_unit_box
+
+
+@pytest.fixture
+def box():
+    """Factory for unit intervals, squares or cubes, see :func:`create_unit_box`."""
+    return create_unit_box
 
 
 @pytest.fixture
 def sides():
     """Marker names of the four sides of the unit square."""
     return SIDES
+
+
+def _assembled(system):
+    """The residual vector and Jacobian and preconditioner matrices of a system.
+
+    A system of several fields is assembled into one blocked vector and matrix.
+    """
+    kind = "mpi" if isinstance(system.residual, list) else None
+    b = dolfinx.fem.petsc.assemble_vector(system.residual, kind=kind)
+    b.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
+    matrices = []
+    for form in (system.jacobian, system.preconditioner):
+        if form is None:
+            matrices.append(None)
+            continue
+        A = dolfinx.fem.petsc.assemble_matrix(form, kind=kind)
+        A.assemble()
+        matrices.append(A)
+    return [b, *matrices]
+
+
+def assert_same_assembly(first, second, rtol: float = 1e-12):
+    """Assert that two discrete systems assemble to the same vectors and matrices.
+
+    The residual vectors and the Jacobian matrices must agree to ``rtol``,
+    relative to the norm of the first, and so must the preconditioners, if
+    either system has one. Discretize both on the same functions, e.g. by
+    building the components on the field of a
+    :class:`~sumfem.symbolic.UFLResidual`, so that they are assembled at the
+    same values.
+    """
+    tensors = list(zip(_assembled(first), _assembled(second), strict=True))
+    try:
+        for what, (x, y) in zip(("residual", "Jacobian", "preconditioner"), tensors):
+            if x is None and y is None:
+                continue
+            assert x is not None and y is not None, f"Only one system has a {what}."
+            reference = x.norm()
+            if isinstance(x, PETSc.Mat):
+                x.axpy(-1.0, y, structure=PETSc.Mat.Structure.DIFFERENT_NONZERO_PATTERN)
+            else:
+                x.axpy(-1.0, y)
+            difference = x.norm()
+            assert difference <= rtol * reference, (
+                f"The {what}s differ by {difference:.3e}, relative to {reference:.3e}."
+            )
+    finally:
+        for pair in tensors:
+            for tensor in pair:
+                if tensor is not None:
+                    tensor.destroy()
+
+
+@pytest.fixture
+def same_assembly():
+    """The comparison of two discrete systems, :func:`assert_same_assembly`."""
+    return assert_same_assembly

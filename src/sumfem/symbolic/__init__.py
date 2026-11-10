@@ -11,6 +11,8 @@
   ``+`` into a :class:`ResidualSum`.
 - :class:`Functional`: a reusable contribution to a scalar functional,
   summed into a :class:`FunctionalSum`, whose variation is a residual.
+- :class:`UFLResidual`: a residual from plain UFL forms, as written for
+  DOLFINx.
 - :func:`build_system`: turns a residual into blocked residual and
   Jacobian forms, optionally in dimensionless form.
 - :func:`Dt` and :class:`Clock`: semi-discrete transient terms.
@@ -45,6 +47,7 @@ from .system import System, build_system
 from .terminals import Field, KnownCoefficient, Parameter
 from .time import Clock, Dt
 from .transfer import Assignment, Interpolation, Transfer, Transferable
+from .ufl_forms import UFLResidual
 from .units import (
     PiGroup,
     UnitError,
@@ -78,6 +81,7 @@ __all__ = [
     "Assignment",
     "Interpolation",
     "Transferable",
+    "UFLResidual",
     "Domain",
     "Field",
     "KnownCoefficient",
