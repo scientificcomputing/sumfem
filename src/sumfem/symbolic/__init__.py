@@ -18,7 +18,8 @@
 - :func:`Dt` and :class:`Clock`: semi-discrete transient terms.
 - :class:`DirichletBC`: boundary conditions by marker name.
 - :func:`check_units`, :func:`equation_scales` and :func:`pi_groups`:
-  dimensional analysis with ``ufl_units``.
+  dimensional analysis with ``ufl_units``, and physical constants such as
+  :data:`BOLTZMANN`.
 """
 
 from ..error_handling import ComponentError, SystemBuildError
@@ -32,6 +33,7 @@ from .components import (
     Residual,
     ResidualSum,
 )
+from .constants import BOLTZMANN
 from .coordinates import (
     Cartesian,
     CoordinateSystem,
@@ -58,6 +60,7 @@ from .units import (
 )
 
 __all__ = [
+    "BOLTZMANN",
     "Cartesian",
     "CoordinateSystem",
     "Cylindrical",
