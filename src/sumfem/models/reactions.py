@@ -15,11 +15,22 @@ from __future__ import annotations
 import typing
 
 import numpy.typing as npt
+import sympy.physics.units as syu
 import ufl
 from ufl.algorithms import extract_coefficients
+from ufl.domain import extract_unique_domain
 
-from sumfem.symbolic import BOLTZMANN, Domain, Field, Residual, Subdomain, as_expr
+from sumfem.symbolic import (
+    BOLTZMANN,
+    Domain,
+    Field,
+    Residual,
+    Subdomain,
+    as_expr,
+    boltzmann_constant,
+)
 from sumfem.symbolic.expressions import replace
+from sumfem.symbolic.si import to_si
 
 __all__ = ["RateReaction", "Reaction", "arrhenius", "mass_action"]
 
@@ -55,7 +66,7 @@ def arrhenius(
     prefactor: ufl.core.expr.Expr | float,
     activation_energy: ufl.core.expr.Expr | float,
     temperature: ufl.core.expr.Expr | float,
-    boltzmann: float = BOLTZMANN,
+    boltzmann: ufl.core.expr.Expr | float | None = None,
 ) -> ufl.core.expr.Expr:
     """The rate constant by the Arrhenius law, ``k_0 exp(-E / (k_B T))``.
 
@@ -67,15 +78,26 @@ def arrhenius(
         prefactor: ``k_0``.
         activation_energy: ``E``, in the energy unit of ``boltzmann``.
         temperature: ``T``, in K.
-        boltzmann: ``k_B`` in J/K, or e.g. in eV/K for ``E`` in eV. A
-            parameter or input with a unit is stored in SI, so in J.
+        boltzmann: ``k_B``. Defaults to the parameter of
+            :func:`~sumfem.symbolic.boltzmann_constant` on the domain of the
+            temperature, in J/K, so that units are checked, or to its SI
+            value for a temperature without a domain, e.g. a number. A
+            number is in J/K, or e.g. in eV/K for ``E`` in eV.
 
     Returns:
         The rate constant ``k_0 exp(-E / (k_B T))``.
     """
-    return as_expr(prefactor) * ufl.exp(
-        -as_expr(activation_energy) / (boltzmann * as_expr(temperature))
-    )
+    T = as_expr(temperature)
+    if boltzmann is None:
+        domain = extract_unique_domain(T)
+        k_B: ufl.core.expr.Expr | float = (
+            boltzmann_constant(domain)
+            if isinstance(domain, Domain)
+            else to_si(BOLTZMANN, syu.joule / syu.kelvin)
+        )
+    else:
+        k_B = boltzmann
+    return as_expr(prefactor) * ufl.exp(-as_expr(activation_energy) / (k_B * T))
 
 
 class RateReaction(Residual):

@@ -9,6 +9,7 @@ residual, Jacobian and preconditioner agree to machine precision.
 
 import numpy as np
 import pytest
+import sympy.physics.units as syu
 import ufl
 from basix.ufl import element
 
@@ -25,7 +26,8 @@ from sumfem.models import (
     Source,
     arrhenius,
 )
-from sumfem.symbolic import BOLTZMANN, Domain, Field, UFLResidual
+from sumfem.symbolic import BOLTZMANN, Domain, Field, UFLResidual, boltzmann_constant
+from sumfem.symbolic.si import to_si
 
 CELLS = ["interval", "triangle", "quadrilateral", "tetrahedron", "hexahedron"]
 """The cell types each comparison runs on."""
@@ -267,9 +269,21 @@ def test_reactions(cell, reaction, ufl_functionspace, box, same_assembly):
 
 
 def test_arrhenius_is_the_arrhenius_law():
-    """``k_0 exp(-E / (k_B T))``, with the Boltzmann constant in J/K by default."""
-    assert BOLTZMANN == 1.380649e-23
-    rate = arrhenius(2.0, 0.5 * BOLTZMANN * 300.0, 300.0)
+    """``k_0 exp(-E / (k_B T))``, with the Boltzmann constant in J/K by default.
+
+    For a temperature without a domain, a number, it is its SI value; on a
+    domain, the parameter of :func:`boltzmann_constant` there, so units are
+    checked.
+    """
+    k_B = to_si(BOLTZMANN, syu.joule / syu.kelvin)
+    assert k_B == 1.380649e-23
+    rate = arrhenius(2.0, 0.5 * k_B * 300.0, 300.0)
     assert float(rate) == pytest.approx(2.0 * np.exp(-0.5))
+    domain = Domain("bar", "interval")
+    T = Field("T", domain, ("Lagrange", 1), unit=syu.kelvin)
+    on_domain = arrhenius(2.0, 1e-20, T)
+    parameter = boltzmann_constant(domain)
+    assert parameter in ufl.algorithms.extract_coefficients(on_domain)
+    assert parameter.name == "bar.k_B" and boltzmann_constant(domain) is parameter
     in_ev = arrhenius(2.0, 0.1, 300.0, boltzmann=8.617333262e-5)
     assert float(in_ev) == pytest.approx(2.0 * np.exp(-0.1 / (8.617333262e-5 * 300.0)))

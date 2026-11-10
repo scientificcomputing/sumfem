@@ -71,6 +71,13 @@ def test_poisson_is_diffusion_and_source():
     a = ufl.algorithms.expand_derivatives(poisson.form)
     b = ufl.algorithms.expand_derivatives(split.form)
     assert a.signature() == b.signature()
+    # It is that sum: a diffusion and a source named after it, which a sum
+    # with another model flattens
+    assert [type(c) for c in poisson.components] == [Diffusion, Source]
+    assert [c.name for c in poisson.components] == ["p", "p"]
+    assert poisson.diffusion is poisson.components[0]
+    other = Source("other", u, 1.0)
+    assert (poisson + other).components == (*poisson.components, other)
 
 
 @pytest.mark.parametrize("shape", [(), (2,)])
