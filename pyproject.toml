@@ -20,10 +20,7 @@ dependencies = [
     "fenics-dolfinx>=0.12.0.dev0",
     "numpy",
     "sympy",
-    # Not yet on PyPI. It blocks publishing sumfem to PyPI until released there.
-    # A git reference takes no version bound, so the tag of the oldest supported
-    # release stands for ">=1.0.0" until then.
-    "ufl-units @ git+https://github.com/fenics-dolfiny/ufl-units@v1.0.0",
+    "ufl-units>=1.0.0",
 ]
 
 
