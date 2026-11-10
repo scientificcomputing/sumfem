@@ -22,7 +22,7 @@ class DirichletBC:
 
     The condition is symbolic: a
     :class:`~sumfem.discrete.discretization.Discretization` turns it
-    into a {py:class}`dolfinx.fem.DirichletBC` on the mesh of the field's domain.
+    into a :class:`dolfinx.fem.DirichletBC` on the mesh of the field's domain.
 
     Attributes:
         field: The field the condition applies to.
