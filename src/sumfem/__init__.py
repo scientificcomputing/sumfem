@@ -21,6 +21,8 @@ written with ``import sumfem`` alone::
 Where a symbolic and a discrete class share a name, such as ``System`` or
 ``DirichletBC``, the symbolic one is exported.
 
+The model families are in :mod:`sumfem.models`.
+
 Post-processing, such as integrals, norms and errors against exact
 solutions, is in :mod:`sumfem.post_processing`, which is imported on its
 own.
