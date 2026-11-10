@@ -24,8 +24,8 @@ Where a symbolic and a discrete class share a name, such as ``System`` or
 The model families are in :mod:`sumfem.models`.
 
 Post-processing, such as integrals, norms and errors against exact
-solutions, is in :mod:`sumfem.post_processing`, which is imported on its
-own.
+solutions, is in :mod:`sumfem.post_processing`, and plotting with PyVista in
+:mod:`sumfem.plotting`, which are imported on their own.
 """
 
 from . import discrete, solvers, symbolic

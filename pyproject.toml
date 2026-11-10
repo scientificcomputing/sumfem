@@ -25,10 +25,16 @@ dependencies = [
 
 
 [project.optional-dependencies]
-test = ["pytest", "sympy", "jax", "scifem", "gmsh"]
+test = ["pytest", "sympy", "jax", "scifem", "gmsh", "pyvista"]
 examples = ["matplotlib", "scipy", "gmsh"]
 dev = ["pdbpp", "ipython", "mypy", "ruff"]
-docs = ["sumfem[examples]", "jupyter-book<2", "jupytext", "sphinx-codeautolink"]
+docs = [
+    "sumfem[examples]",
+    "jupyter-book<2",
+    "jupytext",
+    "sphinx-codeautolink",
+    "pyvista",
+]
 jupyter = ["trame_jupyter_extension", "trame", "pyvista[all]>=0.45.0"]
 all = [
     "sumfem[test]",

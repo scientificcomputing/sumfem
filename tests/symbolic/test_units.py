@@ -8,6 +8,7 @@ import ufl
 from ufl.algorithms import expand_derivatives
 from ufl_units import QuantityMixin
 
+from sumfem.error_handling import ComponentError
 from sumfem.symbolic import (
     Domain,
     Field,
@@ -143,6 +144,37 @@ def test_pi_groups(rod):
     assert group.value == pytest.approx(expected) or group.value == pytest.approx(
         1 / expected
     )
+
+
+def test_pi_groups_of_repeating_quantities(rod):
+    """With repeating quantities, each group is one other quantity times
+    powers of these: the length, temperature and conductivity give the
+    heat source number ``q L^2 / (kappa T_ref)``, not its inverse."""
+    T = Field("T", rod, ("Lagrange", 1), unit=syu.K, scale=10.0)
+    model = HeatConduction("heat", T)
+    system = build_system(model)
+    kappa = system.parameters["heat.kappa"]
+    (group,) = pi_groups(system, repeating=[rod, T, kappa])
+    powers = {str(b): e for b, e in group.expression.as_powers_dict().items()}
+    assert powers == {"heat.q": 1, "L_rod": 2, "heat.kappa": -1, "T_ref": -1}
+    assert group.value == pytest.approx(1e3 * 0.05**2 / (0.6 * 10.0))
+
+
+@pytest.mark.parametrize(
+    "repeating, message",
+    [
+        (["L_rod", "T_ref", "heat.kappa", "heat.q"], "not dimensionally independent"),
+        (["L_rod", "T_ref"], "do not make up"),
+        (["L_rod", "T_ref", "kelvin"], "not quantities of the system"),
+    ],
+)
+def test_repeating_quantities_must_make_up_the_others(rod, repeating, message):
+    """The repeating quantities are of the system, independent, and their
+    dimensions make up those of the others."""
+    T = Field("T", rod, ("Lagrange", 1), unit=syu.K, scale=10.0)
+    system = build_system(HeatConduction("heat", T))
+    with pytest.raises(ComponentError, match=message):
+        pi_groups(system, repeating=repeating)
 
 
 def test_equation_scales_use_the_largest_term(rod):
