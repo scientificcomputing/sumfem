@@ -138,12 +138,19 @@ class Diffusion(Residual):
         The field and its gradient are separate arguments, the form of a
         general flux ``F(u, grad(u))``, so that other terms can evaluate it at
         other arguments, e.g. a boundary value in place of ``u``. This flux
-        does not depend on ``u``.
+        does not depend on ``u``. It has the opposite sign of the physical
+        flux, :meth:`flux`, which is ``-F`` at the field.
         """
         return apply_coefficient(self._coefficient, grad_u)
 
     def flux(self) -> ufl.core.expr.Expr:
-        """The flux ``-k grad(u)``."""
+        """The flux ``-k grad(u)``.
+
+        The physical flux of the field, down its gradient, as in Fick's or
+        Fourier's law. It is minus the :meth:`viscous_flux` at the field, a
+        function of other arguments too, which Nitsche's method and DG
+        need.
+        """
         return -self.viscous_flux(self._field, ufl.grad(self._field))
 
     def residual(self) -> ufl.Form:
@@ -241,6 +248,28 @@ class Poisson(ResidualSum):
         return self._diffusion.field
 
     @property
+    def coefficient(self) -> ufl.core.expr.Expr:
+        """The coefficient ``k``."""
+        return self._diffusion.coefficient
+
+    @property
+    def markers(self) -> tuple[str, ...]:
+        """Cell markers of the region."""
+        return self._diffusion.markers
+
+    @property
     def source(self) -> ufl.core.expr.Expr:
         """The right-hand side."""
         return self._source.source
+
+    def viscous_flux(
+        self, u: ufl.core.expr.Expr, grad_u: ufl.core.expr.Expr
+    ) -> ufl.core.expr.Expr:
+        """The viscous flux ``k grad_u`` of the diffusion, see
+        :meth:`Diffusion.viscous_flux`, e.g. for Nitsche's method."""
+        return self._diffusion.viscous_flux(u, grad_u)
+
+    def flux(self) -> ufl.core.expr.Expr:
+        """The flux ``-k grad(u)`` of the diffusion, minus its
+        :meth:`viscous_flux` at the field, see :meth:`Diffusion.flux`."""
+        return self._diffusion.flux()

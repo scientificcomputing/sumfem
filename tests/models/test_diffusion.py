@@ -7,6 +7,7 @@ import dolfinx.mesh
 import numpy as np
 import pytest
 import ufl
+from ufl.algorithms.renumbering import renumber_indices
 
 from sumfem.discrete import DomainMaps, MeshData, discretize
 from sumfem.models import Accumulation, Diffusion, Poisson, Source
@@ -78,6 +79,17 @@ def test_poisson_is_diffusion_and_source():
     assert poisson.diffusion is poisson.components[0]
     other = Source("other", u, 1.0)
     assert (poisson + other).components == (*poisson.components, other)
+    # The diffusion's flux, e.g. for Nitsche's method, as on a Diffusion
+    # Free indices are numbered anew on each call
+    grad_u = ufl.grad(u)
+    assert renumber_indices(poisson.viscous_flux(u, grad_u)) == renumber_indices(
+        poisson.diffusion.viscous_flux(u, grad_u)
+    )
+    assert renumber_indices(poisson.flux()) == renumber_indices(
+        poisson.diffusion.flux()
+    )
+    assert poisson.coefficient == poisson.diffusion.coefficient
+    assert poisson.markers == ()
 
 
 @pytest.mark.parametrize("shape", [(), (2,)])
