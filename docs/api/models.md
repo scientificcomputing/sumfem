@@ -29,7 +29,17 @@
 .. autoclass:: Outflow
    :members:
 
+.. autoclass:: BoundaryConstraint
+   :members:
+
 .. autoclass:: DirichletMultiplier
+   :members:
+```
+
+## Interfaces
+
+```{eval-rst}
+.. autoclass:: InterfaceConstraint
    :members:
 ```
 
@@ -45,8 +55,6 @@
 .. autofunction:: mass_action
 
 .. autofunction:: arrhenius
-
-.. autodata:: BOLTZMANN
 ```
 
 ## Operators

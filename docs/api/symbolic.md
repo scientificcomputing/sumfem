@@ -137,6 +137,8 @@
    :members:
 
 .. autoexception:: UnitError
+
+.. autodata:: BOLTZMANN
 ```
 
 ## Errors
