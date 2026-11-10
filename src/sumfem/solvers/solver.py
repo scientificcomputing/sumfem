@@ -21,6 +21,7 @@ from ..discrete import system as discrete_system
 
 __all__ = [
     "DEFAULT_PETSC_OPTIONS",
+    "FACTORIZED_ABSOLUTE_TOLERANCES",
     "FACTORIZED_PETSC_OPTIONS",
     "NEWTON_TOLERANCES",
     "Solver",
@@ -54,12 +55,25 @@ _WITHOUT_LINE_SEARCH = frozenset(
 )
 """SNES types that use no line search, for which the default one is dropped."""
 
-FACTORIZED_PETSC_OPTIONS: Mapping[str, typing.Any] = {"snes_stol": 0.0}
+FACTORIZED_ABSOLUTE_TOLERANCES: Mapping[np.dtype, float] = {
+    np.dtype(np.float64): 1e-10,
+    np.dtype(np.float32): 1e-3,
+}
+"""Newton's absolute tolerance for factorized equations, in each precision
+of PETSc's real type. Their residuals are dimensionless, of size one, and
+stall at round-off some thousand machine epsilons above zero, so the
+absolute tolerance is well above that."""
+
+FACTORIZED_PETSC_OPTIONS: Mapping[str, typing.Any] = {
+    "snes_stol": 0.0,
+    "snes_atol": FACTORIZED_ABSOLUTE_TOLERANCES[np.dtype(dolfinx.default_real_type)],
+}
 """Defaults for factorized equations, on top of :data:`DEFAULT_PETSC_OPTIONS`.
 
 Their residuals are dimensionless, so Newton converges on the residual
-alone. The step-size test is off, since it compares the update with the
-solution over all unknowns at once, in SI values of different magnitudes."""
+alone, with the absolute tolerance of :data:`FACTORIZED_ABSOLUTE_TOLERANCES`.
+The step-size test is off, since it compares the update with the solution
+over all unknowns at once, in SI values of different magnitudes."""
 
 # Unique PETSc options prefixes for solvers created without one
 _prefix_counter = itertools.count()

@@ -1,4 +1,5 @@
-"""Dimensional analysis of systems, with ``ufl_units``.
+"""Dimensional analysis of systems, with
+`ufl-units <https://github.com/fenics-dolfiny/ufl-units>`_.
 
 Every equation of a system is analyzed on its own, because different
 equations, say for a potential and for a concentration, have different
