@@ -121,7 +121,7 @@ assert np.isclose(J, 46 / 3)
 # takes like any residual. `terminals` gives it the field of the component
 # above, so both are solved for the same unknown.
 
-# + 
+# +
 mesh = ufl.Mesh(element("Lagrange", "triangle", 1, shape=(2,)))
 V = ufl.FunctionSpace(mesh, element("Lagrange", "triangle", 2))
 uh = ufl.Coefficient(V)
