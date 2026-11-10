@@ -18,3 +18,4 @@ parts:
           - file: "docs/api/discrete"
           - file: "docs/api/solvers"
           - file: "docs/api/post_processing"
+          - file: "docs/api/models"
