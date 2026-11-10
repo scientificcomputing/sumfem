@@ -201,7 +201,9 @@ class DirichletMultiplier(BoundaryConstraint):
     The :class:`BoundaryConstraint` ``c(u) = u - g``, which adds
     ``(lambda, v) + (u - g, mu)`` on the marked facets. Integrating by parts
     identifies the multiplier as the normal flux ``-grad(u) . n`` of a
-    diffusion equation.
+    diffusion equation, as in `Babuška (1973)
+    <https://doi.org/10.1007/BF01436561>`_ and `Gunzburger and Hou (1992)
+    <https://doi.org/10.1137/0729024>`_.
 
     Args:
         name: Name of the model.
