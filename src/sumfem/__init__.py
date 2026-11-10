@@ -10,18 +10,20 @@ The generic framework has three layers, imported as subpackages:
   and the discrete systems and boundary conditions.
 - :mod:`sumfem.solvers`, which solves the discrete systems.
 
-The names users need most are exported here too. Where a symbolic and a
-discrete class share a name, such as ``System`` or ``DirichletBC``, the
-symbolic one is exported.
-
-Battery physics and the other model families live in
-:mod:`sumfem.models`, and post-processing in
-:mod:`sumfem.post_processing`::
+The names users need most are exported here too, so that a model can be
+written with ``import sumfem`` alone::
 
     import sumfem
 
     domain = sumfem.Domain("square", "triangle")
     u = sumfem.Field("u", domain, ("Lagrange", 1))
+
+Where a symbolic and a discrete class share a name, such as ``System`` or
+``DirichletBC``, the symbolic one is exported.
+
+Post-processing, such as integrals, norms and errors against exact
+solutions, is in :mod:`sumfem.post_processing`, which is imported on its
+own.
 """
 
 from . import discrete, solvers, symbolic
@@ -63,6 +65,7 @@ from .symbolic import (
     SystemBuildError,
     Transfer,
     Transferable,
+    UFLResidual,
     UnitError,
     Weighted,
     apply_coordinates,
@@ -120,6 +123,7 @@ __all__ = [
     "SystemBuildError",
     "Transfer",
     "Transferable",
+    "UFLResidual",
     "UnitError",
     "Weighted",
 ]
