@@ -52,6 +52,8 @@
 .. autoclass:: Component
    :members:
 
+.. autofunction:: input_or_parameter
+
 .. autoclass:: Residual
    :members:
 

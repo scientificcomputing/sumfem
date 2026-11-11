@@ -9,6 +9,7 @@ __all__ = [
     "facet_size",
     "normal_outer",
     "normal_projection",
+    "restricted",
     "tangential_projection",
 ]
 
@@ -74,3 +75,13 @@ def tangential_projection(
 ) -> ufl.core.expr.Expr:
     """The tangential component ``(I - n (x) n) w`` of a vector ``w``."""
     return vector - normal_projection(vector, normal)
+
+
+def restricted(expr: ufl.core.expr.Expr, side: str) -> ufl.core.expr.Expr:
+    """An expression restricted to a side of interior facets.
+
+    Constants, which UFL does not restrict, are returned as they are.
+    """
+    if ufl.domain.extract_domains(expr):
+        return expr(side)
+    return expr

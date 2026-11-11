@@ -18,13 +18,19 @@ from sumfem.models import (
     Accumulation,
     BoundaryConstraint,
     BoundaryFlux,
+    Brinkman,
+    BrinkmanForchheimer,
+    Darcy,
     Diffusion,
     DirichletMultiplier,
+    GradDiv,
+    NavierStokes,
     Outflow,
     Poisson,
     RateReaction,
     Reaction,
     Source,
+    Stokes,
     arrhenius,
 )
 from sumfem.solvers import BDF
@@ -302,3 +308,113 @@ def test_accumulation_by_backward_euler(cell, ufl_functionspace, box, same_assem
         plain_values.x.scatter_forward()
         disc_model.function(terminal).x.array[:] = plain_values.x.array
     same_assembly(disc_model[system], disc_plain[plain])
+
+
+@pytest.mark.parametrize("cell", CELLS)
+def test_darcy(cell, ufl_functionspace, box, compare):
+    """Darcy flow ``(K / mu grad(p), grad(q))`` on the cells of a marker."""
+    mesh, Q = ufl_functionspace(cell, degree=2)
+    ph, q = ufl.Coefficient(Q), ufl.TestFunction(Q)
+    K, mu = ufl.Constant(mesh), ufl.Constant(mesh)
+    F = K / mu * ufl.inner(ufl.grad(ph), ufl.grad(q)) * ufl.dx(1)
+    names = {DOMAIN: mesh, "p": ph, "K": K, "mu": mu}
+    plain = UFLResidual("plain", F, ph, names=names, markers={"dx": {1: "LeftHalf"}})
+
+    p = Field("p", Domain(DOMAIN, cell), ("Lagrange", 2))
+    model = Darcy("darcy", p, markers=("LeftHalf",))
+    values = [
+        (
+            {"plain.K": 1e-2, "plain.mu": 3.0},
+            {"darcy.permeability": 1e-2, "darcy.viscosity": 3.0},
+        )
+    ]
+    compare(plain, [plain.field], model, [p], box(cell), values)
+
+
+FLOW_CELLS = ["triangle", "quadrilateral", "tetrahedron", "hexahedron"]
+"""The cell types of the comparisons of flows of a vector velocity."""
+
+
+@pytest.mark.parametrize(
+    "flow", ["stokes", "navier-stokes", "brinkman", "brinkman-forchheimer"]
+)
+@pytest.mark.parametrize("cell", FLOW_CELLS)
+def test_flow(cell, flow, ufl_functionspace, box, compare):
+    """Taylor-Hood flows on the cells of a marker: the viscous term of the
+    symmetric gradient, in the pores ``mu / eps``, with convection
+    ``rho grad(u) u``, in the pores ``rho / eps^2``, Darcy's drag ``mu / K u``
+    and Forchheimer's ``rho beta |u| u``, and the pressure and continuity
+    terms.
+    """
+    gdim = ufl.Cell(cell).topological_dimension
+    mesh, V = ufl_functionspace(cell, degree=2, shape=(gdim,))
+    Q = ufl.FunctionSpace(mesh, element("Lagrange", cell, 1))
+    uh, ph = ufl.Coefficient(V), ufl.Coefficient(Q)
+    w, q = ufl.TestFunctions(ufl.MixedFunctionSpace(V, Q))
+    mu, rho, eps, K, beta, floor = (ufl.Constant(mesh) for _ in range(6))
+    dx = ufl.Measure("dx", mesh)(1)
+    porous = flow in ("brinkman", "brinkman-forchheimer")
+    convection = ufl.dot(ufl.dot(ufl.grad(uh), uh), w) * dx
+    viscosity = mu / eps if porous else mu
+    F = 2 * viscosity * ufl.inner(ufl.sym(ufl.grad(uh)), ufl.sym(ufl.grad(w))) * dx
+    if flow == "navier-stokes":
+        F += rho * convection
+    if porous:
+        F += mu / K * ufl.dot(uh, w) * dx
+    if flow == "brinkman-forchheimer":
+        speed = ufl.sqrt(ufl.dot(uh, uh) + floor**2)
+        F += rho / eps**2 * convection + rho * beta * ufl.dot(speed * uh, w) * dx
+    F += -ph * ufl.div(w) * dx - ufl.div(uh) * q * dx
+    names = {DOMAIN: mesh, "u": uh, "p": ph, "mu": mu, "rho": rho, "eps": eps}
+    names.update(K=K, beta=beta, floor=floor)
+    plain = UFLResidual(
+        "plain", F, [uh, ph], names=names, markers={"dx": {1: "LeftHalf"}}
+    )
+
+    domain = Domain(DOMAIN, cell)
+    u = Field("u", domain, ("Lagrange", 2, (gdim,)))
+    p = Field("p", domain, ("Lagrange", 1))
+    markers = ("LeftHalf",)
+    model = {
+        "stokes": lambda: Stokes("f", u, p, markers=markers),
+        "navier-stokes": lambda: NavierStokes("f", u, p, markers=markers),
+        "brinkman": lambda: Brinkman("f", u, p, markers=markers),
+        "brinkman-forchheimer": lambda: BrinkmanForchheimer("f", u, p, markers=markers),
+    }[flow]()
+    used = {"mu": ("viscosity", 2.0)}
+    if flow in ("navier-stokes", "brinkman-forchheimer"):
+        used["rho"] = ("density", 3.0)
+    if porous:
+        used.update(eps=("porosity", 0.7), K=("permeability", 0.5))
+    if flow == "brinkman-forchheimer":
+        used.update(beta=("forchheimer", 4.0), floor=("speed_floor", 1e-12))
+    values = [
+        (
+            {f"plain.{name}": value for name, (_, value) in used.items()},
+            {f"f.{parameter}": value for parameter, value in used.values()},
+        )
+    ]
+    compare(plain, plain.unknowns, model, [u, p], box(cell), values)
+
+
+@pytest.mark.parametrize("cell", FLOW_CELLS)
+def test_stokes_with_grad_div(cell, ufl_functionspace, box, compare):
+    """Grad-div stabilization ``gamma (div(u), div(w))`` in the residual."""
+    gdim = ufl.Cell(cell).topological_dimension
+    mesh, V = ufl_functionspace(cell, degree=2, shape=(gdim,))
+    Q = ufl.FunctionSpace(mesh, element("Lagrange", cell, 1))
+    uh, ph = ufl.Coefficient(V), ufl.Coefficient(Q)
+    w, q = ufl.TestFunctions(ufl.MixedFunctionSpace(V, Q))
+    F = (
+        2 * ufl.inner(ufl.sym(ufl.grad(uh)), ufl.sym(ufl.grad(w))) * ufl.dx
+        - ph * ufl.div(w) * ufl.dx
+        - ufl.div(uh) * q * ufl.dx
+        + 5.0 * ufl.div(uh) * ufl.div(w) * ufl.dx
+    )
+    plain = UFLResidual("plain", F, [uh, ph], names={DOMAIN: mesh, "u": uh, "p": ph})
+
+    domain = Domain(DOMAIN, cell)
+    u = Field("u", domain, ("Lagrange", 2, (gdim,)))
+    p = Field("p", domain, ("Lagrange", 1))
+    model = Stokes("f", u, p, 1.0) + GradDiv("grad_div", u, 5.0)
+    compare(plain, plain.unknowns, model, [u, p], box(cell))

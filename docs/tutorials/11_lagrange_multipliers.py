@@ -23,7 +23,7 @@
 #   {py:class}`sumfem.models.BoundaryConstraint`, here the contact of an
 #   elastic body with a curved rigid obstacle
 # - Impose a nonlinear condition across an interface between two materials,
-#   {py:class}`sumfem.models.InterfaceConstraint`, here the continuity of the
+#   {py:class}`sumfem.models.InterfaceLagrangeMultiplier`, here the continuity of the
 #   partial pressure of hydrogen
 #
 # A Lagrange multiplier imposes a constraint exactly, at the price of an
@@ -48,7 +48,7 @@ from sumfem.models import (
     BoundaryConstraint,
     Diffusion,
     DirichletMultiplier,
-    InterfaceConstraint,
+    InterfaceLagrangeMultiplier,
     Poisson,
 )
 from sumfem.plotting import gather_grid
@@ -454,7 +454,7 @@ D_0, D_1, K_S, K_H, a, b = 2.0, 0.5, 1.5, 0.8, 3.0, 1.0
 c_0 = symbolic.Field("c_0", metal, ("Lagrange", 1))
 c_1 = symbolic.Field("c_1", liquid, ("Lagrange", 1))
 flux = symbolic.Field("flux", interface, ("Lagrange", 1))
-pressure_continuity = InterfaceConstraint(
+pressure_continuity = InterfaceLagrangeMultiplier(
     "pressure",
     c_0,
     c_1,
