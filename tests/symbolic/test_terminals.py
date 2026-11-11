@@ -152,6 +152,16 @@ def test_parameter_lives_on_a_real_space(domain):
 
 def test_parameter_without_default(domain):
     assert Parameter("k", domain).default is None
+    assert Parameter("k", domain).default_si is None
+
+
+def test_the_default_of_a_parameter_in_si(domain):
+    """The default is in the parameter's unit, ``default_si`` in SI."""
+    length = Parameter("length", domain, default=2.0, unit=syu.centimeter)
+    assert length.default == pytest.approx(2.0)
+    assert length.default_si == pytest.approx(0.02)
+    ratio = Parameter("ratio", domain, shape=(2,), default=[1.0, 3.0])
+    np.testing.assert_allclose(ratio.default_si, [1.0, 3.0])
 
 
 def test_scalar_default_sets_every_component(domain):
