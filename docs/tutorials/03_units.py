@@ -12,7 +12,7 @@
 #     name: python3
 # ---
 
-# # Units
+# # Units and dimensional analysis
 #
 # This tutorial illustrates how to:
 #
@@ -25,26 +25,28 @@
 #
 # The dimensional analysis, the scaling and the dimensionless groups come
 # from [ufl-units](https://github.com/fenics-dolfiny/ufl-units)
-# {cite}`Habera_ufl-units_Software_for`, which analyzes UFL forms; sumfem
-# gives it the units and scales of the fields, parameters and domains of a
-# model, one equation at a time.
+# {cite}`Habera_ufl-units_Software_for`, which analyzes UFL forms
+# {cite}`Habera2026`; sumfem gives it the units and scales of the fields,
+# parameters and domains of a model, one equation at a time.
 #
 # ## Heat and hydrogen in a wall
 #
 # We consider heat and hydrogen in a wall of thickness $L$, as in
 # [FESTIM](https://github.com/festim-dev/festim). Heat is conducted and lost
 # at a rate $\sigma T^4$, and hydrogen diffuses with a diffusivity that
-# follows the temperature by the Arrhenius law,
+# follows the temperature by the Arrhenius law {cite}`Arrhenius1889,Logan1982`,
 #
 # $$
+# \begin{aligned}
 #   -\frac{\mathrm{d}}{\mathrm{d}x}\left(\kappa \frac{\mathrm{d}T}{\mathrm{d}x}\right)
-#   + \sigma T^4 = 0, \qquad
+#   + \sigma T^4 &= 0, \\
 #   -\frac{\mathrm{d}}{\mathrm{d}x}\left(D_0 e^{-E / (k_B T)}
-#   \frac{\mathrm{d}c}{\mathrm{d}x}\right) = 0,
+#   \frac{\mathrm{d}c}{\mathrm{d}x}\right) &= 0,
+# \end{aligned}
 # $$
 #
-# with the temperature and the concentration given on both faces. The
-# temperature is of $10^3$ K, and the concentration of $10^{22}$ m$^{-3}$.
+# with the temperature and the concentration given on both faces. In SI
+# units, the two fields differ by many orders of magnitude.
 
 # +
 import logging
@@ -52,6 +54,7 @@ import time
 
 from mpi4py import MPI
 
+import dolfinx
 import dolfinx.mesh
 import numpy as np
 import sympy.physics.units as syu
@@ -66,34 +69,73 @@ K, W, m, s = syu.kelvin, syu.watt, syu.meter, syu.second
 
 # ## Values in SI, units in the description
 #
-# A field or parameter carries the unit it is written in. Its values are
-# stored in SI base units, so models never convert, and values are set in
-# the unit of the terminal, or as a sympy quantity with its own unit.
+# Every value sumfem stores is in SI base units, so models never convert:
+# meshes are in metres, and fields and parameters hold SI values. Units
+# describe the values: a {py:class}`Field <sumfem.symbolic.Field>` or
+# {py:class}`Parameter <sumfem.symbolic.Parameter>` carries the unit it is
+# written in, values are set in that unit, or as a sympy {py:class}`quantity
+# <sympy.physics.units.quantities.Quantity>` with its own unit, and the
+# dimensional analysis uses the units and a typical size of everything in
+# the equations. The domain, the fields and the parameters each give that
+# size in their own way.
 #
-# The mesh is in metres, as every value. The domain's `length_scale` is the
-# typical length of the problem, which the dimensional analysis uses for
-# gradients.
+# ### A domain and its length scale
+#
+# The {py:attr}`length_scale <sumfem.symbolic.Domain.length_scale>` of a
+# {py:class}`Domain <sumfem.symbolic.Domain>`, in metres, is the typical
+# length of the problem, from which the analysis sizes gradients and
+# integrals {cite}`Habera2026` (Section 3.3). It defaults to one metre, so a
+# domain of a micrometre or of a kilometre must give its own.
+#
+# A mesh of nanometres is no problem for the arithmetic: floating point
+# numbers are as precise, relative to their size, at $10^{-9}$ as at one.
+# What does not scale are absolute thresholds. Newton's tolerances are one,
+# which the scaling of the equations below makes meaningful, given this
+# length scale. Geometric tolerances are another, which scaling does not
+# change: e.g. {py:func}`np.isclose <numpy.isclose>` has the absolute
+# tolerance $10^{-8}$ by default, so the locators of the boundaries below
+# use one relative to the thickness and to the precision of the coordinates.
 
 thickness = 1e-2
-wall_mesh = dolfinx.mesh.create_interval(MPI.COMM_WORLD, 100, [0.0, thickness])
+# The precision of PETSc's real type, which assembly and solvers use
+dtype = dolfinx.default_real_type
+wall_mesh = dolfinx.mesh.create_interval(
+    MPI.COMM_WORLD, 100, [0.0, thickness], dtype=dtype
+)
+# Above the round-off of the coordinates and far below the size of a cell
+tolerance = 100 * np.finfo(dtype).eps * thickness
 wall_marked = discrete.MeshData.from_locators(
     wall_mesh,
     {
         0: {
-            "Hot": lambda x: np.isclose(x[0], 0.0),
-            "Cold": lambda x: np.isclose(x[0], thickness),
+            "Hot": lambda x: np.isclose(x[0], 0.0, atol=tolerance),
+            "Cold": lambda x: np.isclose(x[0], thickness, atol=tolerance),
         }
     },
 )
 wall = symbolic.Domain.from_mesh("wall", wall_mesh, length_scale=thickness)
 
-# The fields' `scale` is their typical size, in their unit. The parameters'
-# defaults are in their own units: the diffusivity in mm$^2$/s and the
-# activation energy in eV.
+# ### Fields: a unit and a scale
+#
+# A field is an unknown: it has no value until it is solved for, so it gives
+# its typical size, {py:attr}`scale <sumfem.symbolic.Field.scale>`, in its
+# own unit. Its order of magnitude is enough: the scale is only used by the
+# dimensional analysis and the scaling of the equations, never to compute
+# the solution. Values of a field, e.g. those of its Dirichlet conditions,
+# are given in its unit.
+
+T = symbolic.Field("T", wall, ("Lagrange", 1), unit=K, scale=1e3)
+c_H = symbolic.Field("c_H", wall, ("Lagrange", 1), unit=1 / m**3, scale=1e22)
+
+# ### Parameters: a unit and a value
+#
+# A parameter has a value, its default or one set later, in its own unit,
+# here the diffusivity factor in mm$^2$/s and the activation energy in eV.
+# The size of its default is its scale for the dimensional analysis, so give
+# a default of the right size: a parameter without one counts as of size
+# one.
 
 # +
-T = symbolic.Field("T", wall, ("Lagrange", 1), unit=K, scale=1000.0)
-c_H = symbolic.Field("c_H", wall, ("Lagrange", 1), unit=1 / m**3, scale=1e22)
 kappa = symbolic.Parameter(
     "kappa", wall, default=400.0, unit=W / (m * K), doc="Thermal conductivity"
 )
@@ -136,6 +178,12 @@ system = symbolic.build_system(transport)
 symbolic.check_units(system)
 print("Dimension of each equation:", symbolic.equation_dimensions(system))
 
+# Each equation has a dimension of its own: the heat equation is a power per
+# area, W/m$^2$, and the hydrogen equation a number of atoms per area and
+# second. The terms within an equation must agree, but different equations
+# need not, so each is checked on its own, and later scaled by its own
+# size.
+#
 # A loss coefficient in W/(m$^2$ K$^4$), the unit of the Stefan–Boltzmann
 # constant for radiation from a surface, does not fit a loss per volume:
 
@@ -151,41 +199,82 @@ except symbolic.UnitError as e:
 
 # ## Dimensionless groups
 #
-# {py:func}`pi_groups <sumfem.symbolic.pi_groups>` finds the dimensionless groups of
-# a system by Buckingham's Pi theorem {cite}`Buckingham1914`, with their
-# values from the parameters' defaults and the scales. Any product of powers
-# of dimensionless groups is one too, so they are not unique. By default,
-# they are those ufl-units finds, which depend on the order in which the
-# quantities appear in the forms. ufl-units logs its analysis, and flags
-# groups far from the others; we print the groups ourselves.
+# {py:func}`pi_groups <sumfem.symbolic.pi_groups>` finds the dimensionless
+# groups of a system by Buckingham's Pi theorem {cite}`Buckingham1914`, with
+# their values from the parameters' defaults and the scales. Any product of
+# powers of dimensionless groups is one too, so they are not unique
+# {cite}`Habera2026` (Section 2.3), and by default they are hard to read:
 
+# ufl-units logs its analysis; the groups are printed here instead
 logging.getLogger("ufl_units").setLevel(logging.ERROR)
 for group in symbolic.pi_groups(system):
     print(f"{group.expression} = {group.value:.3g}")
 
-# Which groups describe the problem is clearer from repeating quantities:
-# every group is then one other quantity times powers of these. With the
-# thickness, the temperature, the conductivity and the Boltzmann constant:
+# Which groups describe the problem is clearer from repeating quantities,
+# as in the method of repeating variables {cite}`CengelCimbala2010`
+# (Section 7.4): every group is then one other quantity times powers of
+# these. With the thickness, the temperature, the conductivity and the
+# Boltzmann constant:
 
 repeating = [wall, T, kappa, symbolic.boltzmann_constant(wall)]
-for group in symbolic.pi_groups(system, repeating=repeating):
+groups = symbolic.pi_groups(system, repeating=repeating)
+for group in groups:
     print(f"{group.expression} = {group.value:.3g}")
 
-# The first is the ratio of the loss to conduction, small here, and the
-# third the Arrhenius number, the activation energy over the thermal
-# energy. The other two cannot change the solution, which dimensional
-# analysis cannot know: the hydrogen equation is linear in the
-# concentration, and the diffusivity factor divides out of it.
+# The value of a group is its expression at the defaults and the scales, and
+# it compares two effects. About one, both matter; much smaller than one,
+# the effect in the numerator is a small correction to that in the
+# denominator; much larger, it dominates. The first group is the ratio of
+# the loss to conduction: much smaller than one, so the loss is a small
+# correction, and the temperature is close to that of conduction alone. The third is the
+# Arrhenius number, the activation energy over the thermal energy at the
+# reference temperature $T_{ref}$, the scale of the temperature. In terms of
+# it the diffusivity is
+#
+# $$
+# \begin{aligned}
+#   \mathrm{Ar} &= \frac{E}{k_B T_{ref}}, \\
+#   D &= D_0 e^{-\mathrm{Ar}\, T_{ref} / T},
+# \end{aligned}
+# $$
+#
+# so at a temperature $T = c\, T_{ref}$ it is
+# $D = D_0 e^{-\mathrm{Ar} / c}$: a factor $c$ in the temperature divides
+# the exponent by $c$, and with $\mathrm{Ar}$ of one or more the diffusivity
+# changes strongly with the temperature. Here, at the reference temperature
+# and at the cold face:
+
+# +
+# The Arrhenius number is the group with the activation energy
+arrhenius_number = next(
+    g.value for g in groups if "E" in {str(q) for q in g.expression.free_symbols}
+)
+for label, temperature in (("T_ref", T.scale), ("the cold face", 300.0)):
+    c = temperature / T.scale
+    print(f"D at {label}: {np.exp(-arrhenius_number / c):.1e} D_0")
+# -
+
+# Values many orders of magnitude from one are not round-off, but ratios of
+# scales, and such a value means one of two things: either the group
+# compares two effects that compete in the equations, and one is negligible
+# beside the other, or its quantities never compete in the equations, so its
+# value cannot change the solution, however large or small. The Pi theorem
+# uses the dimensions of the quantities, not the equations, so it finds
+# groups of both kinds. Two of the groups here are of the second kind,
+# $D_0 k_B / (L^3 \kappa)$ and $L^3 c_{ref}$: the steady hydrogen equation,
+# $\nabla \cdot (D \nabla c) = 0$, is linear in the concentration, so the
+# scale of the concentration divides out of it, and so does $D_0$.
 #
 # ## Scaling the equations
 #
-# In SI units the terms of these equations are of very different sizes: a
-# heat flux of some $10^7$ W/m$^2$, and a flux of hydrogen of some $10^{17}$
-# per m$^2$ and second. Newton's tolerances are absolute and relative, and
+# In SI units these equations are of very different sizes, as their typical
+# sizes, printed below, show. Newton's tolerances are absolute and relative, and
 # such residuals make the absolute one meaningless.
-# {py:func}`equation_scales <sumfem.symbolic.equation_scales>` estimates the size
-# of each equation from the scales of its quantities, and
-# `factorize_equations=True` divides each equation by it.
+# `factorize_equations=True` divides each equation by its typical size, that
+# of its largest term, which {py:func}`equation_scales
+# <sumfem.symbolic.equation_scales>` gives {cite}`Habera2026` (Sections 3.5
+# and 3.6). For scaling PDEs by hand, see {cite}`Langtangen2016` (Chapters 3
+# and 4).
 
 print("Typical size of each equation:", symbolic.equation_scales(system))
 
@@ -193,8 +282,10 @@ print("Typical size of each equation:", symbolic.equation_scales(system))
 # equations, so that the solution is
 #
 # $$
-#   T = T_c + (T_h - T_c) \cos\left(\frac{\pi x}{2 L}\right), \qquad
-#   c = c_h \cos\left(\frac{\pi x}{2 L}\right),
+# \begin{aligned}
+#   T &= T_c + (T_h - T_c) \cos\left(\frac{\pi x}{2 L}\right), \\
+#   c &= c_h \cos\left(\frac{\pi x}{2 L}\right),
+# \end{aligned}
 # $$
 #
 # with the hot face at $x = 0$ and the cold face at $x = L$. The sources are
@@ -224,10 +315,8 @@ wall_bcs = [
 ]
 # -
 
-# The scaled system is solved from a uniform 300 K and no hydrogen, far from
-# the values on the hot face. Newton iterates on the unknowns divided by
-# their scales, and the rows of the Dirichlet conditions are divided by them
-# too, so these rows are of size one like the others.
+# Scaled, the solve may start far from the Dirichlet values, here from a
+# uniform temperature and no hydrogen.
 
 # +
 scaled = symbolic.build_system(manufactured, check_units=True, factorize_equations=True)
@@ -254,10 +343,9 @@ print(
 assert T_error < 1e-4 and c_error < 1e-4
 # -
 
-# {py:meth}`value <sumfem.discrete.Discretization.value>` gives a parameter's
-# value in its own unit. The function holding it, which the forms use, has
-# its SI value: the thickness in metres, the diffusivity factor in m$^2$/s
-# and the activation energy in J.
+# {py:meth}`value <sumfem.discrete.Discretization.value>` gives a
+# parameter's value in its own unit; the forms use its SI value, here in
+# metres, m$^2$/s and J.
 
 for parameter in (L_wall, D_0, E):
     own, si = float(disc.value(parameter)), disc.function(parameter).x.array[0]
@@ -271,15 +359,13 @@ print(f"kappa = {float(disc.value(kappa)):.1f} W/(m K)")
 # ## Scaling and Newton's method
 #
 # Newton's method takes the same steps whether the equations are scaled or
-# not: scaling an equation scales its row of the Jacobian as well, so the
-# update is the same {cite}`Deuflhard2011` (Sections 1.2.2 and 2.1). What
-# scaling changes is when Newton stops. We sweep the temperature of the hot
-# face, each solve starting from the last solution, as in a parameter study
-# or a time step. The first solve starts from linear profiles, which meet
-# the Dirichlet conditions: unscaled, their rows of the residual are in SI,
-# and would otherwise dominate it. The sweep returns the total number of
-# Newton iterations, the time it took, and the discretization holding the
-# last solution.
+# not {cite}`Deuflhard2011` (Sections 1.2.2 and 2.1): what scaling changes
+# is when it stops. We sweep the temperature of the hot face, each solve
+# starting from the last solution, as in a parameter study or a time step.
+# Unscaled, a start must meet the Dirichlet conditions, so the first solve
+# starts from linear profiles. The sweep returns the total number of Newton
+# iterations, the time it took, and the discretization holding the last
+# solution.
 
 
 # +
@@ -303,9 +389,8 @@ def sweep(factorize: bool, hot_temperatures: np.ndarray):
 
 # -
 
-# We sweep the hot face from 1000 to 1100 K in steps of 10 K, unscaled and
-# scaled, and compare the last solutions with the exact ones, at
-# $T_h = 1100$ K.
+# We sweep the temperature of the hot face, unscaled and scaled, and compare
+# the last solutions with the exact one, at the last temperature.
 
 # +
 hot_temperatures = 1000.0 + 10.0 * np.arange(11)
@@ -327,17 +412,14 @@ assert np.allclose(errors[True], errors[False], rtol=1e-4)
 
 # Both solutions are as accurate, to the digits of the error of the
 # discretization, but the scaled sweep takes fewer iterations. Unscaled, the
-# absolute tolerance is in SI and means nothing, so Newton stops when its
-# update is small next to the solution, a norm over both fields that the
-# concentration dominates. It takes one more iteration in each solve to see
-# that, which only reduces an error already far below that of the
-# discretization. Scaled, the residual of every equation is of size one, and
-# Newton stops as soon as it is below the absolute tolerance of
-# {py:data}`FACTORIZED_PETSC_OPTIONS <sumfem.solvers.solver.FACTORIZED_PETSC_OPTIONS>`.
-# The entries of the Jacobian are then of size one as well, instead of
-# around $10^{-22}$ for the concentration, which a direct solver with an
-# absolute test for zero pivots, such as PETSc's own LU, needs. An iterative
-# solver or a line search also sees the sizes of the equations.
+# absolute tolerance is in SI and means nothing, and Newton takes more
+# iterations, to stop on the size of its update instead. Scaled,
+# every equation is of size one, and the absolute tolerance of
+# {py:data}`FACTORIZED_PETSC_OPTIONS
+# <sumfem.solvers.solver.FACTORIZED_PETSC_OPTIONS>` means the same for all
+# of them. Use `factorize_equations=True` when the fields or the equations
+# of a model differ by orders of magnitude; it also suits direct solvers
+# that test for small pivots, such as PETSc's own LU, and iterative solvers.
 
 # ## References
 #

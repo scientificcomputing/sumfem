@@ -1,9 +1,11 @@
 """Dimensional analysis of systems, with
-`ufl-units <https://github.com/fenics-dolfiny/ufl-units>`_.
+`ufl-units <https://github.com/fenics-dolfiny/ufl-units>`_, after `Habera and
+Zilian, 2026 <https://arxiv.org/abs/2601.06535>`_.
 
 Every equation of a system is analyzed on its own, because different
 equations, say for a potential and for a concentration, have different
-dimensions. Within an equation, every term must have the same dimension.
+dimensions, and each gets a reference size of its own (Section 3.6 of the
+paper). Within an equation, every term must have the same dimension.
 
 The analysis needs a typical magnitude of everything in the equations:
 
@@ -190,7 +192,8 @@ def equation_scales(system: System, time_scale: float = 1.0) -> dict[str, float]
     Each term of an equation gets a typical size from the scales of the
     quantities in it. The size of the equation is that of its largest term,
     in SI base units. Dividing the equation by it makes its dominant terms
-    of order one.
+    of order one: the normalization by the dominant term of `Habera and
+    Zilian, 2026 <https://arxiv.org/abs/2601.06535>`_, Section 3.5.
 
     Args:
         system: The system.
@@ -253,11 +256,15 @@ def pi_groups(
     """The dimensionless groups of a system, by Buckingham Pi analysis.
 
     Any product of powers of dimensionless groups is one too, so the groups
-    are not unique. By default, they are a basis of the null space of the
-    dimension matrix, whose form depends on the order in which the
-    quantities appear in the forms. With ``repeating`` quantities, they are
-    those of the method of repeating variables: one group for every other
-    quantity, that quantity times powers of the repeating ones.
+    are not unique (`Habera and Zilian, 2026
+    <https://arxiv.org/abs/2601.06535>`_, Section 2.3). By default, they are
+    a basis of the null space of the dimension matrix, whose form depends on
+    the order in which the quantities appear in the forms (Section 4.1 of
+    the paper). With ``repeating`` quantities, they
+    are those of the method of repeating variables (Çengel and Cimbala,
+    *Fluid Mechanics: Fundamentals and Applications*, 2nd ed., McGraw-Hill,
+    2010, Section 7.4): one group for every other quantity, that quantity
+    times powers of the repeating ones.
 
     Args:
         system: The system.
