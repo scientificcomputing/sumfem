@@ -8,9 +8,9 @@ import pytest
 import ufl
 
 from sumfem.discrete import DomainMaps, MeshData, discretize
-from sumfem.models import Diffusion, RateReaction, Reaction
-from sumfem.solvers import Solver
-from sumfem.symbolic import DirichletBC, Domain, Field, Subdomain
+from sumfem.models import Accumulation, Diffusion, RateReaction, Reaction
+from sumfem.solvers import BDF, Simulation, Solver
+from sumfem.symbolic import Clock, DirichletBC, Domain, Field, Subdomain
 
 TOLERANCES = {"snes_atol": 1e-12, "snes_rtol": 1e-12}
 
@@ -93,3 +93,50 @@ def test_release_across_a_membrane_is_exact():
         x = ufl.SpatialCoordinate(field.domain)
         squared = disc.assemble_scalar((field - exact(x)) ** 2 * dx)
         assert np.sqrt(squared) < 1e-12
+
+
+def test_membrane_reactions_conserve_molecules():
+    """SMART's Example 5 on two halves: ``B + R <-> R_o`` at the ER membrane,
+    and the release ``k R_o (A_ER - A)`` of ``A`` from the ER.
+
+    Molecules of ``A`` in both volumes, and of the receptors, are conserved.
+    """
+    cell, er, cyto, membrane = compartments()
+    A = Field("A", cyto, ("Lagrange", 1))
+    B = Field("B", cyto, ("Lagrange", 1))
+    A_er = Field("A_er", er, ("Lagrange", 1))
+    R = Field("R", membrane, ("Lagrange", 1))
+    R_o = Field("R_o", membrane, ("Lagrange", 1))
+    interface = cell.interface(er, cyto, "ERm")
+    model = (
+        sum(
+            (Accumulation(f"d{f.name}", f) for f in (A, B, A_er, R, R_o)),
+            start=Diffusion("diffusion_A", A, 1.0),
+        )
+        + Diffusion("diffusion_B", B, 1.0)
+        + Diffusion("diffusion_A_er", A_er, 5.0)
+        + Diffusion("diffusion_R", R, 0.02)
+        + Diffusion("diffusion_R_o", R_o, 0.02)
+        + Reaction("opening", {B: 1, R: 1}, {R_o: 1}, 100.0, 100.0, measure=interface)
+        + RateReaction(
+            "release", {A_er: 1}, {A: 1}, 20.0 * R_o * (A_er - A), measure=interface
+        )
+    )
+    clock = Clock(cell, dt=0.01)
+    disc = discretize(model, DomainMaps({cell: halves()}))
+    simulation = Simulation(
+        disc, model, clock=clock, scheme=BDF(1), petsc_options=TOLERANCES
+    )
+    disc.set({A: 0.01, B: 1.0, A_er: 2.0, R: 1.0, R_o: 0.0})
+    totals = (
+        A * cyto.dx() + A_er * er.dx(),
+        R * membrane.dx() + R_o * membrane.dx(),
+        B * cyto.dx() + R_o * membrane.dx(),
+    )
+    initial = [disc.assemble_scalar(total) for total in totals]
+    simulation.run(num_steps=10)
+    for total, start in zip(totals, initial, strict=True):
+        assert disc.assemble_scalar(total) == pytest.approx(start, rel=1e-10)
+    # Receptors opened and A was released into the cytosol
+    assert disc.assemble_scalar(R_o * membrane.dx()) > 0.01
+    assert disc.assemble_scalar(A * cyto.dx()) > 0.01 * 0.5 * 1.01

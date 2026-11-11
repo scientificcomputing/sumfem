@@ -11,6 +11,49 @@
    :members:
 ```
 
+## Time stepping
+
+```{eval-rst}
+.. autoclass:: TimeScheme
+   :members:
+
+.. autoclass:: BDF
+   :members:
+
+.. autoclass:: Theta
+   :members:
+
+.. autoclass:: CrankNicolson
+   :members:
+
+.. autoclass:: ForwardEuler
+   :members:
+```
+
+## Simulations
+
+```{eval-rst}
+.. autoclass:: Simulation
+   :members:
+
+.. autoclass:: AdaptiveSimulation
+   :members:
+
+.. autoclass:: AdaptiveTimeStep
+   :members:
+
+.. autoclass:: Output
+   :members:
+
+.. currentmodule:: sumfem.solvers.simulation
+
+.. autofunction:: owned
+
+.. autofunction:: versions
+
+.. currentmodule:: sumfem.solvers
+```
+
 ## PETSc options
 
 ```{eval-rst}

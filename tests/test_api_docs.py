@@ -30,6 +30,8 @@ def documented(page: pathlib.Path) -> set[str]:
         ("sumfem.discrete", "discrete"),
         ("sumfem.solvers", "solvers"),
         ("sumfem.solvers.solver", "solvers"),
+        ("sumfem.solvers.time_stepping", "solvers"),
+        ("sumfem.solvers.simulation", "solvers"),
         ("sumfem.post_processing", "post_processing"),
         ("sumfem.plotting", "plotting"),
         ("sumfem.models", "models"),
