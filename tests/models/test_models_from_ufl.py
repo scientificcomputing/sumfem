@@ -13,7 +13,9 @@ import sympy.physics.units as syu
 import ufl
 from basix.ufl import element
 
+from sumfem.discrete import DomainMaps, discretize
 from sumfem.models import (
+    Accumulation,
     BoundaryConstraint,
     BoundaryFlux,
     Diffusion,
@@ -25,7 +27,15 @@ from sumfem.models import (
     Source,
     arrhenius,
 )
-from sumfem.symbolic import BOLTZMANN, Domain, Field, UFLResidual, boltzmann_constant
+from sumfem.solvers import BDF
+from sumfem.symbolic import (
+    BOLTZMANN,
+    Domain,
+    Field,
+    UFLResidual,
+    boltzmann_constant,
+    build_system,
+)
 from sumfem.symbolic.si import to_si
 
 CELLS = ["interval", "triangle", "quadrilateral", "tetrahedron", "hexahedron"]
@@ -250,3 +260,45 @@ def test_arrhenius_is_the_arrhenius_law():
     assert parameter.name == "bar.k_B" and boltzmann_constant(domain) is parameter
     in_ev = arrhenius(2.0, 0.1, 300.0, boltzmann=8.617333262e-5)
     assert float(in_ev) == pytest.approx(2.0 * np.exp(-0.1 / (8.617333262e-5 * 300.0)))
+
+
+@pytest.mark.parametrize("cell", CELLS)
+def test_accumulation_by_backward_euler(cell, ufl_functionspace, box, same_assembly):
+    """A weighted time derivative on the cells of a marker, as one step of
+    backward Euler: ``(w (u - u_n) / dt, v)``.
+
+    The model's time derivative becomes the weighted history of
+    :class:`~sumfem.solvers.BDF`, whose weights the scheme sets for a step.
+    """
+    mesh, V = ufl_functionspace(cell, degree=2)
+    uh, un, v = ufl.Coefficient(V), ufl.Coefficient(V), ufl.TestFunction(V)
+    dt = ufl.Constant(mesh)
+    F = 2.5 * (uh - un) / dt * v * ufl.dx(1)
+    plain = UFLResidual(
+        "plain",
+        F,
+        uh,
+        names={DOMAIN: mesh, "u": uh, "dt": dt},
+        markers={"dx": {1: "LeftHalf"}},
+        previous={uh: (un,)},
+    )
+    disc_plain = discretize([plain], DomainMaps({DOMAIN: box(cell)}))
+    disc_plain.set({"plain.dt": 0.1})
+
+    u = Field("u", Domain(DOMAIN, cell), ("Lagrange", 2))
+    model = Accumulation("a", u, 2.5, markers=("LeftHalf",))
+    scheme = BDF(1)
+    system = build_system(model, substitutions=scheme.substitutions(model))
+    disc_model = discretize([system], DomainMaps({DOMAIN: box(cell)}))
+    scheme.set_step(1, 0.1, disc_model)
+
+    rng = np.random.default_rng(seed=7 + 100 * disc_plain.comm.rank)
+    for plain_terminal, terminal in (
+        (plain.field, u),
+        (plain.field.previous(1), u.previous(1)),
+    ):
+        plain_values = disc_plain.function(plain_terminal)
+        plain_values.x.array[:] = rng.uniform(0.5, 1.5, plain_values.x.array.size)
+        plain_values.x.scatter_forward()
+        disc_model.function(terminal).x.array[:] = plain_values.x.array
+    same_assembly(disc_model[system], disc_plain[plain])

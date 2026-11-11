@@ -6,8 +6,9 @@ import pytest
 import ufl
 
 from sumfem.discrete import DomainMaps, discretize
-from sumfem.solvers import Solver
+from sumfem.solvers import BDF, Simulation, Solver
 from sumfem.symbolic import (
+    Clock,
     ComponentError,
     Domain,
     Field,
@@ -67,6 +68,28 @@ def same_matrix(a, b):
     A, B = matrix(a), matrix(b)
     A.axpy(-1.0, B)
     return A.norm() <= 1e-12 * max(B.norm(), 1.0)
+
+
+def transient(toy, square):
+    domain = Domain("cell", "triangle")
+    u = Field("u", domain, ("Lagrange", 1))
+    clock = Clock(domain, dt=0.1)
+    residual = toy.Accumulation("dudt", u) + toy.Diffusion("diffusion", u)
+    return discretize([], DomainMaps({"cell": square()})), u, clock, residual
+
+
+def test_a_derived_preconditioner_includes_time_derivatives(toy, square):
+    """The time scheme's substitution comes before the derivative is taken."""
+    disc, u, clock, residual = transient(toy, square)
+    preconditioned = residual.with_preconditioner(residual.to_jacobian())
+    simulation = Simulation(disc, preconditioned, clock=clock, scheme=BDF(1))
+    system = simulation.solver.system
+    assert same_matrix(system.preconditioner, system.jacobian)
+    # The mass term alone differs from the Jacobian by the stiffness
+    stiffness_free = residual.with_preconditioner(MassMatrix("m", u))
+    other = Simulation(disc, stiffness_free, clock=clock, scheme=BDF(1))
+    system = other.solver.system
+    assert not same_matrix(system.preconditioner, system.jacobian)
 
 
 def test_wrapping_keeps_hand_written_jacobians(toy, square):

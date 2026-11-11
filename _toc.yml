@@ -13,9 +13,14 @@ parts:
   - caption: "Tutorials"
     chapters:
       - file: "docs/tutorials/03_units.py"
+      - file: "docs/tutorials/04_time_stepping.py"
       - file: "docs/tutorials/06_jacobians.py"
       - file: "docs/tutorials/12_nonlinear_energy_functionals.py"
       - file: "docs/tutorials/11_lagrange_multipliers.py"
+  - caption: "Demos"
+    chapters:
+      - file: "examples/heat_bdf2.py"
+      - file: "examples/cooling_plate.py"
   - caption: "Electrochemistry"
     chapters:
       - file: "examples/electrochemistry/porous_electrode.py"

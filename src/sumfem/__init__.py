@@ -8,7 +8,8 @@ The generic framework has three layers, imported as subpackages:
   transfers and dimensional analysis.
 - :mod:`sumfem.discrete`, which binds them to meshes: discretizations,
   and the discrete systems and boundary conditions.
-- :mod:`sumfem.solvers`, which solves the discrete systems.
+- :mod:`sumfem.solvers`, which solves the discrete systems, and steps
+  them in time.
 
 The names users need most are exported here too, so that a model can be
 written with ``import sumfem`` alone::
@@ -38,7 +39,18 @@ from .discrete import (
     discretize,
     ghost_by_vertex,
 )
-from .solvers import Solver
+from .solvers import (
+    BDF,
+    AdaptiveSimulation,
+    AdaptiveTimeStep,
+    CrankNicolson,
+    ForwardEuler,
+    Output,
+    Simulation,
+    Solver,
+    Theta,
+    TimeScheme,
+)
 from .symbolic import (
     Assignment,
     Cartesian,
@@ -91,6 +103,15 @@ __all__ = [
     "discretize",
     "ghost_by_vertex",
     "Solver",
+    "Simulation",
+    "AdaptiveSimulation",
+    "AdaptiveTimeStep",
+    "BDF",
+    "CrankNicolson",
+    "ForwardEuler",
+    "Output",
+    "Theta",
+    "TimeScheme",
     "apply_coordinates",
     "as_expr",
     "Assignment",
