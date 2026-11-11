@@ -140,9 +140,12 @@ options = {
 # with the exact one.
 
 
+# +
 def exact(x):
     return 1 + x[0] ** 2 + 2 * x[1] ** 2
 
+
+# -
 
 # The domains of the plain models are named `"square"`, so one map binds the
 # mesh data to all of them by name:

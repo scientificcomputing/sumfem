@@ -33,7 +33,11 @@ jobs:
   build:
     name: Build ${{ inputs.label }}
     runs-on: ubuntu-latest
-    container: ${{ inputs.image }}
+    container:
+      image: ${{ inputs.image }}
+      # The default resolver of the job container could not resolve the
+      # Ubuntu archive, so apt could not install the rendering libraries
+      options: --dns 1.1.1.1 --dns 8.8.8.8
     env:
       ASSET: ${{ inputs.asset }}
 
@@ -47,10 +51,18 @@ jobs:
         run: grep -v '^#' .github/workflows/openmpi.env >> "$GITHUB_ENV"
 
       - name: Install the libraries of off-screen rendering
-        # VTK, under PyVista, renders with OSMesa where there is no display
+        # VTK, under PyVista, renders the plots of the tutorials without a
+        # display through EGL, with Mesa's software renderer; Mesa no longer
+        # ships OSMesa. apt-get update only warns when it cannot fetch the
+        # package lists, e.g. when DNS fails, so check them
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends libosmesa6 libgl1 libxrender1
+          apt-get -o Acquire::Retries=5 update 2>&1 | tee /tmp/apt-update.log
+          if grep -q "^W: Failed to fetch\|^Err:" /tmp/apt-update.log; then
+            echo "::error::apt-get update could not fetch the package lists"
+            exit 1
+          fi
+          apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
+            libegl1 libegl-mesa0 libgl1 libopengl0 libxrender1
 
       - name: Install sumfem with its test and documentation dependencies
         id: install

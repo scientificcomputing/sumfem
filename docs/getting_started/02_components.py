@@ -21,6 +21,7 @@
 #   and a {py:class}`sumfem.symbolic.Residual`
 # - Extend a model by inheritance
 # - Sum components into a model with `+`
+# - Keep the equation of a contribution that is zero
 #
 # A plain UFL form, as in {doc}`01_poisson_in_ufl`, is fixed: to change a
 # term, the form is written again. A component is a class instead, so a
@@ -64,7 +65,8 @@ from sumfem.post_processing import error
 # {doc}`01_poisson_in_ufl`, or takes existing ones in its `terminals`
 # argument. Here the field is created directly.
 
-domain = symbolic.Domain("square", "triangle")
+cell_name = "triangle"
+domain = symbolic.Domain("square", cell_name)
 u = symbolic.Field("u", domain, ("Lagrange", 2))
 
 # ## The model
@@ -78,6 +80,7 @@ u = symbolic.Field("u", domain, ("Lagrange", 2))
 # conductivity is a method of its own, so that a subclass can change it.
 
 
+# +
 class Poisson(symbolic.Residual):
     """``(k grad(u), grad(v)) - (f, v)``, with ``k = 1``.
 
@@ -102,6 +105,8 @@ class Poisson(symbolic.Residual):
         return ufl.inner(k * ufl.grad(u), ufl.grad(v)) * dx - self.source * v * dx
 
 
+# -
+
 # The model knows what it uses: the fields it writes equations for, and its
 # parameters.
 
@@ -114,7 +119,9 @@ print("Parameters:", list(model.parameters))
 # assembling both. It is discretized and solved in the same way.
 
 # +
-square = dolfinx.mesh.create_unit_square(MPI.COMM_WORLD, 16, 16)
+square = dolfinx.mesh.create_unit_square(
+    MPI.COMM_WORLD, 16, 16, cell_type=dolfinx.mesh.to_type(cell_name)
+)
 marked = discrete.MeshData.from_locators(
     square, {1: {"Boundary": lambda x: np.full(x.shape[1], True)}}, boundary=True
 )
@@ -143,6 +150,7 @@ assert error(disc[u], exact) < 1e-10
 # constructor.
 
 
+# +
 class VariablePoisson(Poisson):
     """Poisson's equation with the conductivity ``1 + x^2``."""
 
@@ -150,6 +158,10 @@ class VariablePoisson(Poisson):
         x = ufl.SpatialCoordinate(self.field.domain)
         return 1 + x[0] ** 2
 
+
+# -
+
+# The source for the same exact solution, and the solve:
 
 k = 1 + x[0] ** 2
 variable = VariablePoisson("variable", u, source=-ufl.div(k * ufl.grad(u_D)))
@@ -241,6 +253,36 @@ disc.set({"source.f": -6.0})
 solvers.Solver(disc[summed], bcs).solve()
 print(f"L2 error: {error(disc[u], exact):.2e}")
 assert error(disc[u], exact) < 1e-10
+
+# ## Contributions that are zero
+#
+# UFL drops the test function from a form whose terms all vanish, e.g. a
+# boundary flux with a prescribed value of zero, and with it the equation
+# the form belongs to. A model whose residual is zero for its inputs returns
+# `ufl.ZeroBaseForm((field.v,))` instead, which keeps its equation:
+
+
+# +
+class Flux(symbolic.Residual):
+    """A prescribed flux ``-(q, v) ds``, zero when ``q`` is."""
+
+    def __init__(self, name, field, q):
+        super().__init__(name)
+        self.field, self.q = field, symbolic.as_expr(q)
+
+    def residual(self):
+        u = self.field
+        # A zero given as a number or as UFL is UFL's Zero
+        if isinstance(self.q, ufl.constantvalue.Zero):
+            return ufl.ZeroBaseForm((u.v,))
+        return -self.q * u.v * u.domain.ds()
+
+
+# -
+
+# With no flux, the model still has the equation of its field:
+
+print("Equations:", [f.name for f in Flux("no_flux", u, 0).equations])
 
 # {doc}`03_preconditioners` solves the variable problem with an iterative
 # solver.

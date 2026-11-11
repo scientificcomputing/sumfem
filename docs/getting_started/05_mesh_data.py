@@ -66,6 +66,7 @@ from_locators = discrete.MeshData.from_locators(
 # are on this process:
 
 
+# +
 def print_markers(mesh_data):
     """The name, entity dimension and number of local entities of each marker."""
     for dim, names in sorted(mesh_data.markers.items()):
@@ -73,6 +74,10 @@ def print_markers(mesh_data):
             count = mesh_data.entities(dim, name).size
             print(f"{name!r}: {count} entities of dimension {dim}")
 
+
+# -
+
+# For the markers made from the locators:
 
 print_markers(from_locators)
 

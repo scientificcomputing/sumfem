@@ -12,16 +12,17 @@
 #     name: python3
 # ---
 
-# # Jacobians and functionals
+# # Jacobians
 #
 # This tutorial illustrates how to:
 #
+# - Solve a nonlinear model with the Jacobian sumfem derives
 # - Replace the derived Jacobian of a model by a hand-written one
 # - Write a Jacobian as a component of its own, a
 #   {py:class}`Jacobian <sumfem.symbolic.Jacobian>`, and attach it to a residual
-# - Describe a problem by an energy, a {py:class}`Functional
-#   <sumfem.symbolic.Functional>`, whose Jacobian is symmetric
-# - Keep the equation of a contribution that is zero
+#
+# A problem described by an energy has a symmetric Jacobian, see
+# {doc}`12_nonlinear_energy_functionals`.
 #
 # ## Derived Jacobians
 #
@@ -32,16 +33,28 @@
 #
 # $$
 #   -\nabla \cdot ((1 + u^2) \nabla u) = f
-# $$
+# $$ (nonlinear-diffusion)
 #
-# it is $\int (1 + u^2) \nabla \delta u \cdot \nabla v + 2 u\, \delta u\,
-# \nabla u \cdot \nabla v \,\mathrm{d}x$, and Newton's method converges
-# quadratically.
+# the residual and its Jacobian, the derivative of the residual in the
+# direction $\delta u$, are
+#
+# $$
+# \begin{aligned}
+#   F(u; v) &= \int_\Omega (1 + u^2) \nabla u \cdot \nabla v - f v
+#   \,\mathrm{d}x, \\
+#   F'(u; v)[\delta u]
+#   &= \frac{\mathrm{d}}{\mathrm{d}\epsilon}
+#   F(u + \epsilon\, \delta u; v) \Big|_{\epsilon = 0} \\
+#   &= \int_\Omega (1 + u^2) \nabla \delta u \cdot \nabla v
+#   + 2 u\, \delta u\, \nabla u \cdot \nabla v \,\mathrm{d}x,
+# \end{aligned}
+# $$ (newton-jacobian)
+#
+# and Newton's method converges quadratically.
 
 # +
 from mpi4py import MPI
 
-import dolfinx.fem.petsc
 import dolfinx.mesh
 import numpy as np
 import ufl
@@ -52,19 +65,61 @@ from sumfem.post_processing import error
 
 # -
 
-domain = symbolic.Domain("square", "triangle")
+# ### The problem
+#
+# The unknown is in quadratic Lagrange elements on a square. The source $f$
+# comes from a manufactured solution, a quadratic, which these elements
+# represent exactly, so the error shows the solver alone. The exact
+# solution is a function of the coordinates, for the symbolic source as for
+# the error and the interpolation later.
+
+
+# +
+def exact(x):
+    return 1 + x[0] ** 2 + 2 * x[1] ** 2
+
+
+cell_name = "triangle"
+domain = symbolic.Domain("square", cell_name)
 u = symbolic.Field("u", domain, ("Lagrange", 2))
 x = ufl.SpatialCoordinate(domain)
-u_exact = 1 + x[0] ** 2 + 2 * x[1] ** 2
+u_exact = exact(x)
 f = -ufl.div((1 + u_exact**2) * ufl.grad(u_exact))
+# -
 
-mesh = dolfinx.mesh.create_unit_square(MPI.COMM_WORLD, 16, 16)
+# The mesh of the square, of the cells of the domain, has its boundary
+# marked `"Boundary"`, where the exact solution is prescribed.
+
+mesh = dolfinx.mesh.create_unit_square(
+    MPI.COMM_WORLD, 16, 16, cell_type=dolfinx.mesh.to_type(cell_name)
+)
 marked = discrete.MeshData.from_locators(
     mesh, {1: {"Boundary": lambda x: np.full(x.shape[1], True)}}, boundary=True
 )
 bcs = [symbolic.DirichletBC(u, "Boundary", u_exact)]
 
+# A helper discretizes a model on the mesh, starts Newton's method from a
+# constant, solves, and returns the number of iterations and the error.
 
+
+# +
+def solve(model):
+    disc = discrete.discretize([model], discrete.DomainMaps({domain: marked}))
+    disc.set({u: 1.0})
+    solver = solvers.Solver(disc[model], bcs)
+    solver.solve()
+    accuracy = error(disc[u], exact)
+    return solver.iterations, accuracy
+
+
+# -
+
+# The nonlinear diffusion is a {py:class}`Residual <sumfem.symbolic.Residual>`
+# that returns its weak form; the source is the
+# {py:class}`Source <sumfem.models.Source>` model.
+
+
+# +
 class NonlinearDiffusion(symbolic.Residual):
     """``((1 + u^2) grad(u), grad(v))``."""
 
@@ -77,28 +132,50 @@ class NonlinearDiffusion(symbolic.Residual):
         return ufl.inner((1 + u**2) * ufl.grad(u), ufl.grad(u.v)) * u.domain.dx()
 
 
-def solve(model):
-    disc = discrete.discretize([model], discrete.DomainMaps({domain: marked}))
-    disc.set({u: 1.0})
-    solver = solvers.Solver(disc[model], bcs)
-    solver.solve()
-    accuracy = error(disc[u], lambda x: 1 + x[0] ** 2 + 2 * x[1] ** 2)
-    return solver.iterations, accuracy
+# -
 
+# ### Newton's method
+#
+# The diffusion and the source, summed, solved with the derived Jacobian:
 
 newton = NonlinearDiffusion("diffusion", u) + Source("source", u, f)
 print("Newton: %d iterations, error %.1e" % solve(newton))
 
-# ## A hand-written Jacobian
+# ## Hand-written Jacobians
 #
 # A model may give its own linearization in {py:meth}`jacobian
-# <sumfem.symbolic.Residual.jacobian>`, as a form with the trial function `u.du`.
-# The Picard linearization freezes the coefficient, $\int (1 + u^2)\nabla
-# \delta u \cdot \nabla v \,\mathrm{d}x$: each iteration is cheaper to
-# assemble, but convergence is only linear. The solution is the same, to
+# <sumfem.symbolic.Residual.jacobian>`, as a form with the trial function
+# {py:attr}`u.du <sumfem.symbolic.Field.du>`.
+#
+# ### Picard's method, in a model
+#
+# The Picard linearization freezes the coefficient,
+#
+# $$
+#   \int_\Omega (1 + u^2) \nabla \delta u \cdot \nabla v \,\mathrm{d}x,
+# $$ (picard-jacobian)
+#
+# dropping the second term of {eq}`newton-jacobian`: each iteration is
+# cheaper to assemble, but convergence is only linear. The solution is the same, to
 # the solver's tolerance, since only the path to it changes.
+#
+# With this Jacobian, a step of Newton's method is a Picard iteration. The
+# residual is $A(u) u - b$, with $A(w)$ the diffusion with the coefficient
+# $1 + w^2$ and $b$ the source, and the Jacobian is $A(u_n)$, so
+#
+# $$
+#   u_{n+1} = u_n - A(u_n)^{-1} \left(A(u_n) u_n - b\right) = A(u_n)^{-1} b,
+# $$
+#
+# with the full step of Newton's method without a line search, sumfem's
+# default. That is, $u_{n+1}$ solves
+#
+# $$
+#   -\nabla \cdot ((1 + u_n^2) \nabla u_{n+1}) = f.
+# $$ (picard-iteration)
 
 
+# +
 class PicardDiffusion(NonlinearDiffusion):
     """Nonlinear diffusion, linearized with its coefficient frozen."""
 
@@ -107,6 +184,10 @@ class PicardDiffusion(NonlinearDiffusion):
         return ufl.inner((1 + u**2) * ufl.grad(u.du), ufl.grad(u.v)) * u.domain.dx()
 
 
+# -
+
+# Summed with the source and solved as before:
+
 picard = PicardDiffusion("diffusion", u) + Source("source", u, f)
 picard_result = solve(picard)
 print("Picard: %d iterations, error %.1e" % picard_result)
@@ -114,7 +195,7 @@ print("Picard: %d iterations, error %.1e" % picard_result)
 # Summands without a hand-written Jacobian, like the source here, keep
 # their derived ones.
 #
-# ## Jacobians as components
+# ### Picard's method, as a component
 #
 # A linearization can also be a component of its own, a {py:class}`Jacobian
 # <sumfem.symbolic.Jacobian>`, that returns a bilinear form. Jacobians sum with
@@ -160,92 +241,3 @@ assert attached_result == picard_result
 #   to the diffusion alone, `NonlinearDiffusion("diffusion",
 #   u).with_jacobian(...) + Source("source", u, f)`, it would replace the
 #   Jacobian of that summand only, as `PicardDiffusion` does.
-
-# ## Functionals
-#
-# A problem can also be described by an energy, a {py:class}`Functional
-# <sumfem.symbolic.Functional>`, whose variation is the residual, see
-# {doc}`../getting_started/04_energy_functionals`. The Jacobian is then the
-# second variation of the energy, which is symmetric. The nonlinear
-# diffusion above is the variation of no energy, and its Jacobian is not
-# symmetric: its term $2 u\, \delta u\, \nabla u \cdot \nabla v$ changes
-# when $\delta u$ and $v$ swap. The energy
-#
-# $$
-#   J(u) = \int_\Omega \frac{1}{2} (1 + u^2) |\nabla u|^2 - g u \,\mathrm{d}x
-# $$
-#
-# has the variation $\int (1 + u^2) \nabla u \cdot \nabla v + u |\nabla u|^2
-# v - g v \,\mathrm{d}x$, of a nonlinear diffusion too,
-# $-\nabla \cdot ((1 + u^2) \nabla u) + u |\nabla u|^2 = g$. With $g$ for
-# the same exact solution, its residual from {py:meth}`to_residual
-# <sumfem.symbolic.Functional.to_residual>` is solved like any other:
-
-
-# +
-class NonlinearEnergy(symbolic.Functional):
-    """``int 1/2 (1 + u^2) |grad(u)|^2 - g u dx``."""
-
-    def __init__(self, name, field, source):
-        super().__init__(name)
-        self.field, self.source = field, source
-
-    def functional(self):
-        u = self.field
-        gradient = ufl.inner(ufl.grad(u), ufl.grad(u))
-        return (0.5 * (1 + u**2) * gradient - self.source * u) * u.domain.dx()
-
-
-g = f + u_exact * ufl.inner(ufl.grad(u_exact), ufl.grad(u_exact))
-variational = NonlinearEnergy("energy", u, g).to_residual()
-print("Energy: %d iterations, error %.1e" % solve(variational))
-# -
-
-# The Jacobians of the two problems, assembled at the exact solution, show
-# the difference:
-
-
-# +
-def symmetric_jacobian(model):
-    disc = discrete.discretize([model], discrete.DomainMaps({domain: marked}))
-    disc.function(u).interpolate(lambda x: 1 + x[0] ** 2 + 2 * x[1] ** 2)
-    A = dolfinx.fem.petsc.assemble_matrix(disc[model].jacobian)
-    A.assemble()
-    symmetric = A.isSymmetric(1e-10)
-    A.destroy()
-    return symmetric
-
-
-print("Symmetric Jacobian of the energy:", symmetric_jacobian(variational))
-print("Symmetric Jacobian of the nonlinear diffusion:", symmetric_jacobian(newton))
-assert symmetric_jacobian(variational) and not symmetric_jacobian(newton)
-# -
-
-# A symmetric Jacobian can be solved with methods for symmetric matrices,
-# e.g. a Cholesky factorization, or conjugate gradients where it is also
-# positive definite.
-#
-# ## Contributions that are zero
-#
-# UFL drops the test function from a form whose terms all vanish, e.g. a
-# boundary flux with a prescribed value of zero. A model whose residual is
-# zero for its inputs returns `ufl.ZeroBaseForm((field.v,))` instead, which
-# keeps its equation:
-
-
-class Flux(symbolic.Residual):
-    """A prescribed flux ``-(q, v) ds``, zero when ``q`` is."""
-
-    def __init__(self, name, field, q):
-        super().__init__(name)
-        self.field, self.q = field, symbolic.as_expr(q)
-
-    def residual(self):
-        u = self.field
-        # A zero given as a number or as UFL is UFL's Zero
-        if isinstance(self.q, ufl.constantvalue.Zero):
-            return ufl.ZeroBaseForm((u.v,))
-        return -self.q * u.v * u.domain.ds()
-
-
-print("Equations:", [f.name for f in Flux("no_flux", u, 0).equations])
