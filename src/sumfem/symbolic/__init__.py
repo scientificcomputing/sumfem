@@ -19,7 +19,8 @@
 - :class:`DirichletBC`: boundary conditions by marker name.
 - :func:`check_units`, :func:`equation_scales` and :func:`pi_groups`:
   dimensional analysis with ``ufl_units``, and physical constants such as
-  :data:`BOLTZMANN`, and :func:`boltzmann_constant` for forms.
+  :data:`BOLTZMANN`, :data:`FARADAY` and :data:`GAS_CONSTANT`, and
+  :func:`boltzmann_constant` for forms.
 """
 
 from ..error_handling import ComponentError, SystemBuildError
@@ -33,7 +34,7 @@ from .components import (
     Residual,
     ResidualSum,
 )
-from .constants import BOLTZMANN, boltzmann_constant
+from .constants import BOLTZMANN, FARADAY, GAS_CONSTANT, boltzmann_constant
 from .coordinates import (
     Cartesian,
     CoordinateSystem,
@@ -61,6 +62,8 @@ from .units import (
 
 __all__ = [
     "BOLTZMANN",
+    "FARADAY",
+    "GAS_CONSTANT",
     "Cartesian",
     "CoordinateSystem",
     "Cylindrical",

@@ -15,15 +15,33 @@ from .domains import Domain
 from .si import to_si
 from .terminals import Parameter
 
-__all__ = ["BOLTZMANN", "boltzmann_constant"]
+__all__ = ["BOLTZMANN", "FARADAY", "GAS_CONSTANT", "boltzmann_constant"]
 
 _BOLTZMANN_UNIT = syu.joule / syu.kelvin
 """The unit of the Boltzmann constant."""
+
+_AVOGADRO = sympy.Integer(602214076) * sympy.Integer(10) ** 15
+"""Avogadro's number, ``N_A = 6.02214076e23`` per mole, exact by the
+definition of the SI."""
+
+_ELEMENTARY_CHARGE = sympy.Rational(1602176634, 10**28)
+"""The elementary charge ``e = 1.602176634e-19`` in C, exact by the definition
+of the SI."""
 
 BOLTZMANN: sympy.Expr = sympy.Rational(1380649, 10**29) * _BOLTZMANN_UNIT
 """The Boltzmann constant ``k_B = 1.380649e-23 J/K``, exact by the definition
 of the SI, as a sympy quantity. :func:`boltzmann_constant` gives it on a
 domain, for forms."""
+
+FARADAY: sympy.Expr = _AVOGADRO * _ELEMENTARY_CHARGE * syu.coulomb / syu.mol
+"""Faraday's constant ``F = N_A e``, about 96485.33 C/mol, exact by the
+definition of the SI, as a sympy quantity."""
+
+GAS_CONSTANT: sympy.Expr = (
+    _AVOGADRO * sympy.Rational(1380649, 10**29) * syu.joule / (syu.mol * syu.kelvin)
+)
+"""The gas constant ``R = N_A k_B``, about 8.314 J/(mol K), exact by the
+definition of the SI, as a sympy quantity."""
 
 _on_domains: weakref.WeakKeyDictionary[Domain, Parameter] = weakref.WeakKeyDictionary()
 """The Boltzmann constant of each domain it was asked for."""
