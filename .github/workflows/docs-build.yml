@@ -33,7 +33,11 @@ jobs:
   build:
     name: Build ${{ inputs.label }}
     runs-on: ubuntu-latest
-    container: ${{ inputs.image }}
+    container:
+      image: ${{ inputs.image }}
+      # The default resolver of the job container could not resolve the
+      # Ubuntu archive, so apt could not install the rendering libraries
+      options: --dns 1.1.1.1 --dns 8.8.8.8
     env:
       ASSET: ${{ inputs.asset }}
 

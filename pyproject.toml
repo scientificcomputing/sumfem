@@ -25,7 +25,7 @@ dependencies = [
 
 
 [project.optional-dependencies]
-test = ["pytest", "sympy", "jax", "scifem", "gmsh", "pyvista"]
+test = ["pytest", "sympy", "jax", "scifem", "gmsh", "pyvista", "scipy"]
 examples = ["matplotlib", "scipy", "gmsh"]
 dev = ["pdbpp", "ipython", "mypy", "ruff"]
 docs = [
