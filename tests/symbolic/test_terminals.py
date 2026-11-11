@@ -164,6 +164,19 @@ def test_the_default_of_a_parameter_in_si(domain):
     np.testing.assert_allclose(ratio.default_si, [1.0, 3.0])
 
 
+def test_a_default_with_units_is_converted_to_the_unit(domain):
+    """A quantity becomes a value in the declared unit, so that constants can
+    carry their units; another dimension is rejected."""
+    length = Parameter("length", domain, default=5 * syu.centimeter, unit=syu.mm)
+    assert length.default == pytest.approx(50.0)
+    assert length.default_si == pytest.approx(0.05)
+    diffusivity = syu.m**2 / syu.s
+    rate = Parameter("D", domain, default=0.36 * syu.cm**2 / syu.hour, unit=diffusivity)
+    assert rate.default_si == pytest.approx(1e-8)
+    with pytest.raises(ValueError, match="does not have the dimension"):
+        Parameter("bad", domain, default=1.0 * syu.m / syu.s, unit=diffusivity)
+
+
 def test_scalar_default_sets_every_component(domain):
     np.testing.assert_allclose(
         Parameter("g", domain, shape=(2,), default=3.0).default, [3, 3]

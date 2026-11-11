@@ -19,6 +19,11 @@ def bruggeman(
 ) -> ufl.core.expr.Expr:
     """Bruggeman's effective property ``value * fraction**exponent``.
 
+    It corrects a transport property of a phase for the volume the other
+    phase takes and for the tortuosity of the paths through it. The exponent
+    ``3/2`` is that of spherical obstructions, see `Tjaden et al., 2016
+    <https://doi.org/10.1016/j.coche.2016.02.006>`_.
+
     Args:
         value: The property of the phase, e.g. a diffusivity or the
             conductivity of the solid.
@@ -35,6 +40,10 @@ def kozeny_carman(
     constant: ufl.core.expr.Expr | float,
 ) -> ufl.core.expr.Expr:
     """Kozeny-Carman permeability ``d^2 eps^3 / (K (1 - eps)^2)`` of a fibrous medium.
+
+    An estimate of the permeability of a fibrous porous electrode, such as a
+    carbon felt, from the diameter of its fibres, with an empirical constant
+    ``K``.
 
     Args:
         fiber_diameter: Fiber diameter ``d``.
@@ -69,6 +78,17 @@ def ergun_coefficient(
     porosity: ufl.core.expr.Expr, length: ufl.core.expr.Expr
 ) -> ufl.core.expr.Expr:
     """Ergun's inertial drag coefficient ``1.75 (1 - eps) / (L eps^3)``.
+
+    The coefficient ``beta``, in 1/m, of Forchheimer's drag ``rho beta |u| u``
+    on the superficial velocity ``u``, from Ergun's relation for randomly
+    packed beds of spheres of diameter ``L`` (`Ergun and Orning, 1949
+    <https://doi.org/10.1021/ie50474a011>`_). For a fibrous electrode, such
+    as a carbon felt, it is an estimate only: the model of `Tomadakis and
+    Robertson, 2005 <https://doi.org/10.1177/0021998305046438>`_ is made for
+    random fibre structures, and fits to experiments give the coefficient of
+    a given electrode, e.g. of the order of Ergun's for the 3D printed
+    electrodes of `van der Heijden et al., 2023
+    <https://doi.org/10.1002/admt.202300611>`_.
 
     Args:
         porosity: Porosity ``eps``.

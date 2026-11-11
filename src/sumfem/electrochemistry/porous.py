@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 
+import sympy
 import sympy.physics.units as syu
 import ufl
 
@@ -53,7 +54,8 @@ class PorousElectrode:
         name: Prefix of the parameter names.
         domain: The domain of the parameters.
         markers: Cell markers of the electrode. Empty for the whole domain.
-        porosity: Default porosity, if any.
+        porosity: Default porosity, if any. Every default with a unit is in
+            SI units, or a quantity with units, e.g. ``0.5 * syu.micrometer``.
         conductivity: Default conductivity of the fiber material in S/m, if
             any.
         specific_area: Default specific area in 1/m, if any.
@@ -90,11 +92,11 @@ class PorousElectrode:
         domain: Domain,
         markers: tuple[str, ...] = (),
         porosity: float | None = None,
-        conductivity: float | None = None,
-        specific_area: float | None = None,
-        fiber_diameter: float | None = None,
+        conductivity: float | sympy.Expr | None = None,
+        specific_area: float | sympy.Expr | None = None,
+        fiber_diameter: float | sympy.Expr | None = None,
         kozeny_carman_constant: float | None = None,
-        pore_length: float | None = None,
+        pore_length: float | sympy.Expr | None = None,
     ):
         self._markers = tuple(markers)
         self._porosity = Parameter(
@@ -165,11 +167,13 @@ class PorousElectrode:
         return bruggeman(self._conductivity, 1.0 - self._porosity)
 
     def permeability(self) -> ufl.core.expr.Expr:
-        """Kozeny-Carman permeability of the fibers."""
+        """Kozeny-Carman permeability of the fibers, see
+        :func:`~sumfem.models.kozeny_carman`."""
         return kozeny_carman(
             self._fiber_diameter, self._porosity, self._kozeny_carman_constant
         )
 
     def forchheimer(self) -> ufl.core.expr.Expr:
-        """Ergun's inertial drag coefficient."""
+        """Ergun's inertial drag coefficient, an estimate for fibres, see
+        :func:`~sumfem.models.ergun_coefficient`."""
         return ergun_coefficient(self._porosity, self._pore_length)

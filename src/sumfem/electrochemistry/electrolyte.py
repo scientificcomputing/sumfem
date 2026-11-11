@@ -6,6 +6,7 @@ import dataclasses
 import types
 import typing
 
+import sympy
 import sympy.physics.units as syu
 import ufl
 
@@ -33,8 +34,9 @@ class Ion:
     Attributes:
         name: Name of the ion, e.g. ``"V2"``.
         charge: Charge number ``z``.
-        diffusivity: Diffusion coefficient in free electrolyte, in m^2/s.
-            It is the default value of the parameter the electrolyte creates.
+        diffusivity: Diffusion coefficient in free electrolyte, in m^2/s or a
+            quantity with units, e.g. ``1e-9 * syu.m**2 / syu.s``. It is the
+            default value of the parameter the electrolyte creates.
         concentration: The field of a transported ion. ``None`` for the one
             ion whose concentration follows from electroneutrality.
         positive: Use a smooth positive part of the concentration in the
@@ -44,7 +46,7 @@ class Ion:
 
     name: str
     charge: float
-    diffusivity: float
+    diffusivity: float | sympy.Expr
     concentration: Field | None = None
     positive: bool = False
 

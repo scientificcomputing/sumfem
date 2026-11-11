@@ -1,4 +1,4 @@
-"""Models of electrochemistry, built on :mod:`sumfem.models`.
+r"""Models of electrochemistry, built on :mod:`sumfem.models`.
 
 - Electrolytes: :class:`Electrolyte`, a dilute solution of :class:`Ion`
   and the constants and properties its models share.
@@ -9,6 +9,8 @@
 - Kinetics: :class:`ExchangeCurrentButlerVolmer`, :class:`ButlerVolmer`
   and :class:`MassTransferButlerVolmer`, on :class:`ElectrodeReaction`,
   with the Butler-Volmer equation :func:`~sumfem.models.butler_volmer`.
+- Half-cells of a redox flow battery: :class:`RedoxHalfCell`, negative or
+  positive, of any couple and electrolyte.
 
 The package imports from the core of :mod:`sumfem`, and never the other
 way around.
@@ -16,6 +18,7 @@ way around.
 
 from .charge import ElectrolyteConduction
 from .electrolyte import Electrolyte, Ion
+from .half_cell import RedoxHalfCell
 from .kinetics import (
     ButlerVolmer,
     ElectrodeReaction,
@@ -32,6 +35,7 @@ __all__ = [
     "Region",
     "ElectrolyteConduction",
     "NernstPlanck",
+    "RedoxHalfCell",
     "ButlerVolmer",
     "ElectrodeReaction",
     "ExchangeCurrentButlerVolmer",

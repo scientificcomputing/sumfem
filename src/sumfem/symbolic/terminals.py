@@ -39,7 +39,7 @@ from ufl_units import QuantityMixin
 from ..error_handling import ComponentError, check_name, qualified_name
 from .domains import Domain, domain_of
 from .elements import ElementSpec, as_element
-from .si import Unit, to_si
+from .si import Unit, has_units, si_factor, to_si
 
 _PIOLA = (
     ufl.pullback.contravariant_piola,
@@ -442,14 +442,20 @@ class Parameter(ufl.Coefficient, QuantityMixin):
             named ``"<component>.<name>"``.
         domain: The domain the parameter is defined on.
         shape: Value shape, ``()`` for a scalar.
-        default: Default value in ``unit``, used when no other value is set.
-            A scalar sets every component of a vector or tensor parameter.
+        default: Default value in ``unit``, used when no other value is set,
+            or a sympy quantity carrying its own units, e.g. ``0.5 *
+            syu.millimeter``, converted to ``unit``. A scalar sets every
+            component of a vector or tensor parameter.
         unit: Unit of the value, a sympy unit expression. ``None`` means
             dimensionless. The discretization stores values in SI base units.
         doc: Description, shown in documentation and archived metadata.
 
     The name must be passed positionally: ``ufl.Coefficient.__new__`` reads
     the first positional argument.
+
+    Raises:
+        ValueError: If a default with units does not have the dimension of
+            ``unit``.
     """
 
     _name: str
@@ -467,7 +473,7 @@ class Parameter(ufl.Coefficient, QuantityMixin):
         /,
         domain: Domain,
         shape: tuple[int, ...] = (),
-        default: npt.ArrayLike | None = None,
+        default: npt.ArrayLike | sympy.Expr | None = None,
         unit: Unit | None = None,
         doc: str = "",
     ):
@@ -484,6 +490,9 @@ class Parameter(ufl.Coefficient, QuantityMixin):
         space = ufl.FunctionSpace(domain, element, label=f"{name}#parameter")
         ufl.Coefficient.__init__(self, space)
         self._name = name
+        if has_units(default):
+            # A quantity with its own units, as a value in the declared unit
+            default = to_si(default, unit) / si_factor(unit)
         self._default = (
             None if default is None else _validate_value(name, default, shape)
         )
