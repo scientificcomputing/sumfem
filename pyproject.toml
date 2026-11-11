@@ -34,6 +34,8 @@ docs = [
     "jupytext",
     "sphinx-codeautolink",
     "pyvista",
+    # The html backend of PyVista's plots in the book, with anywidget
+    "trame-pyvista[jupyter]",
 ]
 jupyter = ["trame_jupyter_extension", "trame", "pyvista[all]>=0.45.0"]
 all = [

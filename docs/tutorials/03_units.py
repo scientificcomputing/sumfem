@@ -79,6 +79,7 @@ K, W, m, s = syu.kelvin, syu.watt, syu.meter, syu.second
 # the equations. The domain, the fields and the parameters each give that
 # size in their own way.
 #
+# (units-length-scale)=
 # ### A domain and its length scale
 #
 # The {py:attr}`length_scale <sumfem.symbolic.Domain.length_scale>` of a
@@ -166,6 +167,7 @@ transport = (
 # parameter `"wall.k_B"` in J/K, so the exponent is checked to be
 # dimensionless as well.
 #
+# (units-checking)=
 # ## Checking units
 #
 # {py:func}`build_system <sumfem.symbolic.build_system>` collects the equations of
@@ -269,6 +271,7 @@ for label, temperature in (("T_ref", T.scale), ("the cold face", 300.0)):
 # the second of {eq}`wall-equations`, is linear in the concentration, so the
 # scale of the concentration divides out of it, and so does $D_0$.
 #
+# (units-scaling)=
 # ## Scaling the equations
 #
 # In SI units these equations are of very different sizes, as their typical

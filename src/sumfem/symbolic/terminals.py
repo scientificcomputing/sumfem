@@ -39,7 +39,7 @@ from ufl_units import QuantityMixin
 from ..error_handling import ComponentError, check_name, qualified_name
 from .domains import Domain, domain_of
 from .elements import ElementSpec, as_element
-from .si import Unit
+from .si import Unit, to_si
 
 _PIOLA = (
     ufl.pullback.contravariant_piola,
@@ -507,6 +507,14 @@ class Parameter(ufl.Coefficient, QuantityMixin):
     def default(self) -> npt.NDArray[typing.Any] | None:
         """Default value, or ``None`` if the value must be set explicitly."""
         return None if self._default is None else self._default.copy()
+
+    @property
+    def default_si(self) -> npt.NDArray[typing.Any] | None:
+        """Default value in SI base units, as the discretization stores it, or
+        ``None`` without a default."""
+        if self._default is None:
+            return None
+        return np.asarray(to_si(self._default, self.unit))
 
     @property
     def doc(self) -> str:

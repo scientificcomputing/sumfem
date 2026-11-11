@@ -140,6 +140,10 @@
 
 .. autodata:: BOLTZMANN
 
+.. autodata:: FARADAY
+
+.. autodata:: GAS_CONSTANT
+
 .. autofunction:: boltzmann_constant
 ```
 

@@ -16,6 +16,9 @@ parts:
       - file: "docs/tutorials/06_jacobians.py"
       - file: "docs/tutorials/12_nonlinear_energy_functionals.py"
       - file: "docs/tutorials/11_lagrange_multipliers.py"
+  - caption: "Electrochemistry"
+    chapters:
+      - file: "examples/electrochemistry/porous_electrode.py"
   - caption: "Python API"
     chapters:
       - file: "docs/api/index"
@@ -26,3 +29,4 @@ parts:
           - file: "docs/api/post_processing"
           - file: "docs/api/plotting"
           - file: "docs/api/models"
+          - file: "docs/api/electrochemistry"

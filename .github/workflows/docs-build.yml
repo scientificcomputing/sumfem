@@ -40,6 +40,14 @@ jobs:
       options: --dns 1.1.1.1 --dns 8.8.8.8
     env:
       ASSET: ${{ inputs.asset }}
+      PYVISTA_OFF_SCREEN: false
+      # Interactive plots in the book, from trame-pyvista
+      PYVISTA_JUPYTER_BACKEND: "html"
+      # Render through EGL, whose libraries the step below installs: Mesa no
+      # longer ships OSMesa, and without it VTK's OSMesa window crashes the
+      # kernel when a plot is shown
+      VTK_DEFAULT_OPENGL_WINDOW: vtkEGLRenderWindow
+
 
     steps:
       - name: Check out the version
