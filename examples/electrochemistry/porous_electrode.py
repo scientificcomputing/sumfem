@@ -16,13 +16,16 @@
 #
 # This demo solves the porous electrode of the benchmark of
 # {cite}`Wang2025`, in one, two and three dimensions, and validates it
-# against a reference solution of the problem reduced to one dimension. It
-# shows how to:
+# against a reference solution of the problem reduced to one dimension, see
+# {ref}`electrode-validation`. It shows how to:
 #
-# - Write a battery model in plain UFL, and the same model from sumfem's
-#   components
+# - Build a battery model with sumfem's
+#   {ref}`models of electrochemistry <electrode-electrochemistry>`, then
+#   with its {ref}`generic components <electrode-generic>` alone, and in
+#   {ref}`plain UFL <electrode-ufl>`
 # - Give its parameters units, check them, and solve the model scaled
-# - Reduce the model to one equation for the overpotential
+# - Reduce the model to
+#   {ref}`one equation for the overpotential <electrode-one-equation>`
 #
 # ## The model
 #
@@ -89,6 +92,7 @@ from sumfem.models import (
 )
 from sumfem.plotting import gather_grid
 from sumfem.post_processing import interpolate_to_line
+from sumfem.symbolic.si import to_si
 
 # Images in the book, unless PYVISTA_JUPYTER_BACKEND chooses another backend
 if "PYVISTA_JUPYTER_BACKEND" not in os.environ:
@@ -145,11 +149,8 @@ domain = symbolic.Domain.from_mesh("electrode", rectangle, length_scale=width)
 
 # The parameters have the values of the benchmark, in their units, so that
 # sumfem can check the units, see {ref}`units-checking`, and scale the
-# equations, see {ref}`units-scaling`. The constants of the
-# electrolyte, $F$, $R$ and $T$, come from an
-# {py:class}`Electrolyte <sumfem.electrochemistry.Electrolyte>` of uniform composition,
-# and the potentials are fields in volts, of a typical size of a tenth of a
-# volt:
+# equations, see {ref}`units-scaling`. The potentials are fields in volts,
+# of a typical size of a tenth of a volt:
 
 # +
 S, m, A, V = syu.siemens, syu.meter, syu.ampere, syu.volt
@@ -180,88 +181,29 @@ def potentials(domain, degree):
 
 
 p = parameters(domain)
-electrolyte = Electrolyte("electrolyte", domain)
 phi_e_field, phi_l_field = potentials(domain, degree)
-# -
-
-# ## The model in plain UFL
-#
-# The weak form of {eq}`electrode` and {eq}`electrode-currents` is written in
-# plain UFL, as in a UFL file of DOLFINx, on a mesh of the same cells, with
-# the current collector and the membrane as the boundary markers 1 and 2:
-
-# +
-mesh = ufl.Mesh(element("Lagrange", cell_name, 1, shape=(2,)))
-Q_e = ufl.FunctionSpace(mesh, element("Lagrange", cell_name, degree))
-Q_l = ufl.FunctionSpace(mesh, element("Lagrange", cell_name, degree))
-phi_e, phi_l = ufl.Coefficient(Q_e), ufl.Coefficient(Q_l)
-v_e, v_l = ufl.TestFunctions(ufl.MixedFunctionSpace(Q_e, Q_l))
-sigma, kappa, a, i0, E_eq, j, F, R, T = (ufl.Constant(mesh) for _ in range(9))
-
-eta = phi_e - phi_l - E_eq
-reaction = a * i0 * (ufl.exp(F * eta / (2 * R * T)) - ufl.exp(-F * eta / (2 * R * T)))
-ds = ufl.Measure("ds", domain=mesh)
-residual = (
-    ufl.inner(sigma * ufl.grad(phi_e), ufl.grad(v_e)) * ufl.dx
-    + ufl.inner(kappa * ufl.grad(phi_l), ufl.grad(v_l)) * ufl.dx
-    + reaction * v_e * ufl.dx
-    - reaction * v_l * ufl.dx
-    - j * v_e * ds(1)
-    + j * v_l * ds(2)
-)
-# -
-
-# {py:class}`UFLResidual <sumfem.symbolic.UFLResidual>` turns it into a
-# residual of sumfem, as introduced in
-# {doc}`../docs/getting_started/01_poisson_in_ufl`: the coefficients become
-# the potentials, the constants the parameters and the constants of the
-# electrolyte, the UFL mesh the domain, and the boundary markers 1 and 2 the
-# current collector and the membrane:
-
-# +
-plain = symbolic.UFLResidual(
-    "electrode",
-    residual,
-    [phi_e, phi_l],
-    domains={mesh: domain},
-    markers={"ds": {1: "CurrentCollector", 2: "Membrane"}},
-    terminals={
-        phi_e: phi_e_field,
-        phi_l: phi_l_field,
-        sigma: p["sigma"],
-        kappa: p["kappa"],
-        a: p["a"],
-        i0: p["i0"],
-        E_eq: p["E_eq"],
-        j: p["j"],
-        F: electrolyte.F,
-        R: electrolyte.R,
-        T: electrolyte.T,
-    },
-)
-# -
-
-# The units are checked, the equations scaled, and the model solved:
-
-# +
 maps = discrete.DomainMaps({domain: marked})
-system = symbolic.build_system(plain, check_units=True, factorize_equations=True)
-disc = discrete.discretize([system], maps)
-solvers.Solver(disc[system]).solve()
-plain_difference = (
-    disc.function(phi_e_field).x.array - disc.function(phi_l_field).x.array
-)
 # -
 
-# ## The model from components
+# The model is written three times below, from the top down: with the
+# models of electrochemistry, with sumfem's generic components alone, and in
+# plain UFL. Each gives the same solution.
 #
-# The same model is a sum of sumfem's components, each a term of
-# {eq}`electrode` or {eq}`electrode-currents`: Ohmic conduction in the solid
-# and the electrolyte, {py:class}`Conduction <sumfem.models.Conduction>`,
-# Butler-Volmer kinetics,
-# {py:class}`~sumfem.electrochemistry.ExchangeCurrentButlerVolmer`,
-# and the applied current on the two boundaries,
-# {py:class}`BoundaryFlux <sumfem.models.BoundaryFlux>`.
+# (electrode-electrochemistry)=
+# ## With the models of electrochemistry
+#
+# {py:mod}`sumfem.electrochemistry` holds the models of electrochemistry. An
+# {py:class}`~sumfem.electrochemistry.Electrolyte` holds Faraday's constant
+# $F$, the gas constant $R$ and the temperature $T$, as parameters with
+# units that the models built on it share; here it is of uniform
+# composition, without ions. The reaction of {eq}`electrode` is
+# {py:class}`~sumfem.electrochemistry.ExchangeCurrentButlerVolmer`, which
+# adds the current $a\, i(\eta)$ to the equations of both potentials. Ohmic
+# conduction in the solid and the electrolyte,
+# {py:class}`Conduction <sumfem.models.Conduction>`, and the applied current
+# on the two boundaries of {eq}`electrode-currents`,
+# {py:class}`BoundaryFlux <sumfem.models.BoundaryFlux>`, are generic
+# components of {py:mod}`sumfem.models`. The model is their sum:
 
 
 # +
@@ -287,6 +229,14 @@ def electrode(p, electrolyte, phi_e, phi_l):
     return model, reaction
 
 
+electrolyte = Electrolyte("electrolyte", domain)
+model, reaction = electrode(p, electrolyte, phi_e_field, phi_l_field)
+# -
+
+# The units are checked, the equations scaled, and the model solved:
+
+
+# +
 def solve(model, maps):
     system = symbolic.build_system(model, check_units=True, factorize_equations=True)
     disc = discrete.discretize([system], maps)
@@ -294,30 +244,16 @@ def solve(model, maps):
     return disc
 
 
-components, reaction = electrode(p, electrolyte, phi_e_field, phi_l_field)
-disc = solve(components, maps)
+disc = solve(model, maps)
 # -
 
-# Only currents are prescribed, and the potentials enter the reaction only
-# through their difference, so both potentials are determined up to the
-# same constant: their difference is what the model determines. Both
-# formulations give the same difference, to round-off. The reaction also
-# carries all of the applied current, which enters through the current
-# collector of height $H$:
+# The reaction carries all of the applied current, which enters through the
+# current collector of height $H$:
 
 # +
-components_difference = (
-    disc.function(phi_e_field).x.array - disc.function(phi_l_field).x.array
-)
-difference = (
-    np.abs(components_difference - plain_difference).max()
-    / np.abs(plain_difference).max()
-)
 reacted = disc.assemble_scalar(reaction.source() * domain.dx())
 applied = p["j"].default_si * height
-print(f"Relative difference of phi_e - phi_l: {difference:.1e}")
 print(f"Reacted over applied current: {reacted / applied}")
-assert difference < 1e-10
 assert np.isclose(reacted, applied, rtol=1e-8)
 # -
 
@@ -344,6 +280,128 @@ if MPI.COMM_WORLD.rank == 0:
     plotter.add_mesh(grid, scalars="eta", scalar_bar_args={"title": "eta (V)"})
     plotter.view_xy()
     plotter.show()
+# -
+
+# Only currents are prescribed, and the potentials enter the reaction only
+# through their difference, so both potentials are determined up to the
+# same constant: their difference is what the model determines, and what the
+# formulations below are compared by:
+
+
+# +
+def potential_difference(disc):
+    return disc.function(phi_e_field).x.array - disc.function(phi_l_field).x.array
+
+
+def relative_difference(disc, reference):
+    difference = np.abs(potential_difference(disc) - reference).max()
+    return difference / np.abs(reference).max()
+
+
+reference_difference = potential_difference(disc)
+# -
+
+# (electrode-generic)=
+# ## With generic components
+#
+# Without the models of electrochemistry, $F$, $R$ and $T$ are parameters
+# of their own: the exact constants
+# {py:data}`FARADAY <sumfem.symbolic.FARADAY>` and
+# {py:data}`GAS_CONSTANT <sumfem.symbolic.GAS_CONSTANT>` in SI units, and the
+# room temperature, the default of the electrolyte above:
+
+# +
+C, J, K, mol = syu.coulomb, syu.joule, syu.kelvin, syu.mol
+F = symbolic.Parameter(
+    "F", domain, default=to_si(symbolic.FARADAY, C / mol), unit=C / mol
+)
+R = symbolic.Parameter(
+    "R", domain, default=to_si(symbolic.GAS_CONSTANT, J / (mol * K)), unit=J / (mol * K)
+)
+T = symbolic.Parameter("T", domain, default=298.15, unit=K)
+# -
+
+# The reaction is then a source in each equation of {eq}`electrode`, with the
+# current density of {py:func}`butler_volmer <sumfem.models.butler_volmer>`,
+# which takes the overpotential over the thermal voltage $R T / F$, and its
+# transfer coefficients one half by default:
+
+# +
+eta = phi_e_field - phi_l_field - p["E_eq"]
+current = p["a"] * butler_volmer(p["i0"], eta / (R * T / F))
+generic = (
+    Conduction("solid", phi_e_field, p["sigma"])
+    + Conduction("electrolyte", phi_l_field, p["kappa"])
+    + Source("solid_reaction", phi_e_field, -current)
+    + Source("electrolyte_reaction", phi_l_field, current)
+    + BoundaryFlux("collector", phi_e_field, p["j"], ("CurrentCollector",))
+    + BoundaryFlux("membrane", phi_l_field, -p["j"], ("Membrane",))
+)
+generic_difference = relative_difference(solve(generic, maps), reference_difference)
+print(f"Relative difference of phi_e - phi_l: {generic_difference:.1e}")
+assert generic_difference < 1e-10
+# -
+
+# (electrode-ufl)=
+# ## In plain UFL
+#
+# The weak form of {eq}`electrode` and {eq}`electrode-currents` is written in
+# plain UFL, as in a UFL file of DOLFINx, on a mesh of the same cells, with
+# the current collector and the membrane as the boundary markers 1 and 2:
+
+# +
+mesh = ufl.Mesh(element("Lagrange", cell_name, 1, shape=(2,)))
+Q_e = ufl.FunctionSpace(mesh, element("Lagrange", cell_name, degree))
+Q_l = ufl.FunctionSpace(mesh, element("Lagrange", cell_name, degree))
+phi_e, phi_l = ufl.Coefficient(Q_e), ufl.Coefficient(Q_l)
+v_e, v_l = ufl.TestFunctions(ufl.MixedFunctionSpace(Q_e, Q_l))
+sigma, kappa, a, i0, E_eq, j, F_c, R_c, T_c = (ufl.Constant(mesh) for _ in range(9))
+
+eta_ufl = phi_e - phi_l - E_eq
+x = F_c * eta_ufl / (R_c * T_c)
+reaction_ufl = a * i0 * (ufl.exp(x / 2) - ufl.exp(-x / 2))
+ds = ufl.Measure("ds", domain=mesh)
+residual = (
+    ufl.inner(sigma * ufl.grad(phi_e), ufl.grad(v_e)) * ufl.dx
+    + ufl.inner(kappa * ufl.grad(phi_l), ufl.grad(v_l)) * ufl.dx
+    + reaction_ufl * v_e * ufl.dx
+    - reaction_ufl * v_l * ufl.dx
+    - j * v_e * ds(1)
+    + j * v_l * ds(2)
+)
+# -
+
+# {py:class}`UFLResidual <sumfem.symbolic.UFLResidual>` turns it into a
+# residual of sumfem, as introduced in
+# {doc}`../../docs/getting_started/01_poisson_in_ufl`: the coefficients become
+# the potentials, the constants the parameters above, the UFL mesh the
+# domain, and the boundary markers 1 and 2 the current collector and the
+# membrane:
+
+# +
+plain = symbolic.UFLResidual(
+    "electrode",
+    residual,
+    [phi_e, phi_l],
+    domains={mesh: domain},
+    markers={"ds": {1: "CurrentCollector", 2: "Membrane"}},
+    terminals={
+        phi_e: phi_e_field,
+        phi_l: phi_l_field,
+        sigma: p["sigma"],
+        kappa: p["kappa"],
+        a: p["a"],
+        i0: p["i0"],
+        E_eq: p["E_eq"],
+        j: p["j"],
+        F_c: F,
+        R_c: R,
+        T_c: T,
+    },
+)
+plain_difference = relative_difference(solve(plain, maps), reference_difference)
+print(f"Relative difference of phi_e - phi_l: {plain_difference:.1e}")
+assert plain_difference < 1e-10
 # -
 
 # ## Across the electrode
@@ -411,6 +469,7 @@ print(f"Reacted over applied current: {reacted_3d / applied_3d}")
 assert np.isclose(reacted_3d, applied_3d, rtol=1e-8)
 # -
 
+# (electrode-one-equation)=
 # ## One equation for the overpotential
 #
 # With constant conductivities, the two potentials can be eliminated:
@@ -453,6 +512,7 @@ print(f"Reacted over applied current: {reacted_eta / applied}")
 assert np.isclose(reacted_eta, applied, rtol=1e-8)
 # -
 
+# (electrode-validation)=
 # ## Validation
 #
 # The solution depends on $x$ alone. Across the electrode, the current
