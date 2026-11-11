@@ -74,5 +74,6 @@ sphinx:
       dolfinx: ["https://docs.fenicsproject.org/dolfinx/main/python", null]
       sympy: ["https://docs.sympy.org/latest/", null]
       numpy: ["https://numpy.org/doc/stable/", null]
+      scipy: ["https://docs.scipy.org/doc/scipy/", null]
       petsc4py: ["https://petsc.org/release/petsc4py", null]
       mpi4py: ["https://mpi4py.readthedocs.io/en/stable", null]

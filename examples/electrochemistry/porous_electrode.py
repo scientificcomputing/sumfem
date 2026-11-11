@@ -68,6 +68,7 @@
 
 # + tags=["hide-input"]
 import os
+from collections.abc import Callable, Sequence
 
 from mpi4py import MPI
 
@@ -128,7 +129,9 @@ rectangle = dolfinx.mesh.create_rectangle(
 
 
 # +
-def mark(mesh, dim, width, tolerance):
+def mark(
+    mesh: dolfinx.mesh.Mesh, dim: int, width: float, tolerance: float
+) -> discrete.MeshData:
     """The current collector at x = 0 and the membrane at x = width."""
     return discrete.MeshData.from_locators(
         mesh,
@@ -142,7 +145,7 @@ def mark(mesh, dim, width, tolerance):
     )
 
 
-tolerance = 100 * np.finfo(dtype).eps * width
+tolerance = 100 * float(np.finfo(dtype).eps) * width
 marked = mark(rectangle, 1, width, tolerance)
 domain = symbolic.Domain.from_mesh("electrode", rectangle, length_scale=width)
 # -
@@ -156,7 +159,7 @@ domain = symbolic.Domain.from_mesh("electrode", rectangle, length_scale=width)
 S, m, A, V = syu.siemens, syu.meter, syu.ampere, syu.volt
 
 
-def parameters(domain):
+def create_parameters(domain: symbolic.Domain) -> dict[str, symbolic.Parameter]:
     """The parameters of the benchmark on a domain."""
     values = {
         "sigma": (103.1891, S / m, "Conductivity of the solid"),
@@ -172,7 +175,9 @@ def parameters(domain):
     }
 
 
-def potentials(domain, degree):
+def create_potentials(
+    domain: symbolic.Domain, degree: int
+) -> tuple[symbolic.Field, ...]:
     """The potentials of the solid and of the electrolyte."""
     return tuple(
         symbolic.Field(name, domain, ("Lagrange", degree), unit=V, scale=0.1)
@@ -180,8 +185,8 @@ def potentials(domain, degree):
     )
 
 
-p = parameters(domain)
-phi_e_field, phi_l_field = potentials(domain, degree)
+parameters = create_parameters(domain)
+phi_e_field, phi_l_field = create_potentials(domain, degree)
 maps = discrete.DomainMaps({domain: marked})
 # -
 
@@ -196,48 +201,75 @@ maps = discrete.DomainMaps({domain: marked})
 # {py:class}`~sumfem.electrochemistry.Electrolyte` holds Faraday's constant
 # $F$, the gas constant $R$ and the temperature $T$, as parameters with
 # units that the models built on it share; here it is of uniform
-# composition, without ions. The reaction of {eq}`electrode` is
-# {py:class}`~sumfem.electrochemistry.ExchangeCurrentButlerVolmer`, which
-# adds the current $a\, i(\eta)$ to the equations of both potentials. Ohmic
-# conduction in the solid and the electrolyte,
-# {py:class}`Conduction <sumfem.models.Conduction>`, and the applied current
-# on the two boundaries of {eq}`electrode-currents`,
-# {py:class}`BoundaryFlux <sumfem.models.BoundaryFlux>`, are generic
-# components of {py:mod}`sumfem.models`. The model is their sum:
+# composition, without ions.
+#
+# The model is a sum of components, one per term of {eq}`electrode` and
+# {eq}`electrode-currents`. Each takes a name first, which identifies it in
+# messages and prefixes the parameters it creates, then the field whose
+# equation it adds to, then its coefficients:
+#
+# - {py:class}`Conduction <sumfem.models.Conduction>`, the Ohmic conduction
+#   term of each equation of {eq}`electrode`, takes the potential and the
+#   conductivity. A component in the volume acts on the whole domain unless
+#   it is given the markers of the cells to act on, an optional argument, so
+#   the conductions need none here.
+# - {py:class}`~sumfem.electrochemistry.ExchangeCurrentButlerVolmer`, the
+#   reaction, takes the potentials of the solid and of the electrolyte and
+#   the electrolyte, and adds the current $a\, i(\eta)$ to the equation of
+#   the solid and subtracts it from that of the electrolyte. Its exchange
+#   current density, equilibrium potential, transfer coefficients and
+#   specific area are keyword arguments.
+# - {py:class}`BoundaryFlux <sumfem.models.BoundaryFlux>`, the applied
+#   current of {eq}`electrode-currents`, takes the potential and the current
+#   that enters through the boundary per unit area: $j$ into the solid on
+#   the current collector, and $-j$ into the electrolyte on the membrane. A
+#   flux acts on a part of the boundary, so its markers are required: a
+#   tuple of the names given by `mark` above, as a component may act on
+#   several marked parts.
+#
+# The conductions and the applied currents are generic components of
+# {py:mod}`sumfem.models`, the reaction a model of electrochemistry:
 
 
 # +
-def electrode(p, electrolyte, phi_e, phi_l):
+def electrode(
+    parameters: dict[str, symbolic.Parameter],
+    electrolyte: Electrolyte,
+    phi_e: symbolic.Field,
+    phi_l: symbolic.Field,
+) -> tuple[symbolic.Residual, ExchangeCurrentButlerVolmer]:
     reaction = ExchangeCurrentButlerVolmer(
         "reaction",
         phi_e,
         phi_l,
         electrolyte,
-        exchange_current=p["i0"],
-        equilibrium_potential=p["E_eq"],
+        exchange_current=parameters["i0"],
+        equilibrium_potential=parameters["E_eq"],
         anodic_transfer=0.5,
         cathodic_transfer=0.5,
-        specific_area=p["a"],
+        specific_area=parameters["a"],
     )
     model = (
-        Conduction("solid", phi_e, p["sigma"])
-        + Conduction("electrolyte", phi_l, p["kappa"])
+        Conduction("solid", phi_e, parameters["sigma"])
+        + Conduction("electrolyte", phi_l, parameters["kappa"])
         + reaction
-        + BoundaryFlux("collector", phi_e, p["j"], ("CurrentCollector",))
-        + BoundaryFlux("membrane", phi_l, -p["j"], ("Membrane",))
+        + BoundaryFlux("collector", phi_e, parameters["j"], ("CurrentCollector",))
+        + BoundaryFlux("membrane", phi_l, -parameters["j"], ("Membrane",))
     )
     return model, reaction
 
 
 electrolyte = Electrolyte("electrolyte", domain)
-model, reaction = electrode(p, electrolyte, phi_e_field, phi_l_field)
+model, reaction = electrode(parameters, electrolyte, phi_e_field, phi_l_field)
 # -
 
 # The units are checked, the equations scaled, and the model solved:
 
 
 # +
-def solve(model, maps):
+def solve(
+    model: symbolic.Residual, maps: discrete.DomainMaps
+) -> discrete.Discretization:
     system = symbolic.build_system(model, check_units=True, factorize_equations=True)
     disc = discrete.discretize([system], maps)
     solvers.Solver(disc[system]).solve()
@@ -252,7 +284,7 @@ disc = solve(model, maps)
 
 # +
 reacted = disc.assemble_scalar(reaction.source() * domain.dx())
-applied = p["j"].default_si * height
+applied = parameters["j"].default_si * height
 print(f"Reacted over applied current: {reacted / applied}")
 assert np.isclose(reacted, applied, rtol=1e-8)
 # -
@@ -263,7 +295,11 @@ assert np.isclose(reacted, applied, rtol=1e-8)
 
 
 # +
-def overpotential(disc, phi_e, reaction):
+def overpotential(
+    disc: discrete.Discretization,
+    phi_e: symbolic.Field,
+    reaction: ExchangeCurrentButlerVolmer,
+) -> dolfinx.fem.Function:
     space = disc.function_space(phi_e)
     eta = dolfinx.fem.Function(space, name="eta")
     expression = disc[reaction.overpotential()]
@@ -276,7 +312,7 @@ def overpotential(disc, phi_e, reaction):
 eta_2d = overpotential(disc, phi_e_field, reaction)
 grid = gather_grid(eta_2d)
 if MPI.COMM_WORLD.rank == 0:
-    plotter = pyvista.Plotter(window_size=(640, 480))
+    plotter = pyvista.Plotter(window_size=[640, 480])
     plotter.add_mesh(grid, scalars="eta", scalar_bar_args={"title": "eta (V)"})
     plotter.view_xy()
     plotter.show()
@@ -289,11 +325,11 @@ if MPI.COMM_WORLD.rank == 0:
 
 
 # +
-def potential_difference(disc):
+def potential_difference(disc: discrete.Discretization) -> np.ndarray:
     return disc.function(phi_e_field).x.array - disc.function(phi_l_field).x.array
 
 
-def relative_difference(disc, reference):
+def relative_difference(disc: discrete.Discretization, reference: np.ndarray) -> float:
     difference = np.abs(potential_difference(disc) - reference).max()
     return difference / np.abs(reference).max()
 
@@ -327,15 +363,15 @@ T = symbolic.Parameter("T", domain, default=298.15, unit=K)
 # transfer coefficients one half by default:
 
 # +
-eta = phi_e_field - phi_l_field - p["E_eq"]
-current = p["a"] * butler_volmer(p["i0"], eta / (R * T / F))
+eta = phi_e_field - phi_l_field - parameters["E_eq"]
+current = parameters["a"] * butler_volmer(parameters["i0"], eta / (R * T / F))
 generic = (
-    Conduction("solid", phi_e_field, p["sigma"])
-    + Conduction("electrolyte", phi_l_field, p["kappa"])
+    Conduction("solid", phi_e_field, parameters["sigma"])
+    + Conduction("electrolyte", phi_l_field, parameters["kappa"])
     + Source("solid_reaction", phi_e_field, -current)
     + Source("electrolyte_reaction", phi_l_field, current)
-    + BoundaryFlux("collector", phi_e_field, p["j"], ("CurrentCollector",))
-    + BoundaryFlux("membrane", phi_l_field, -p["j"], ("Membrane",))
+    + BoundaryFlux("collector", phi_e_field, parameters["j"], ("CurrentCollector",))
+    + BoundaryFlux("membrane", phi_l_field, -parameters["j"], ("Membrane",))
 )
 generic_difference = relative_difference(solve(generic, maps), reference_difference)
 print(f"Relative difference of phi_e - phi_l: {generic_difference:.1e}")
@@ -388,12 +424,12 @@ plain = symbolic.UFLResidual(
     terminals={
         phi_e: phi_e_field,
         phi_l: phi_l_field,
-        sigma: p["sigma"],
-        kappa: p["kappa"],
-        a: p["a"],
-        i0: p["i0"],
-        E_eq: p["E_eq"],
-        j: p["j"],
+        sigma: parameters["sigma"],
+        kappa: parameters["kappa"],
+        a: parameters["a"],
+        i0: parameters["i0"],
+        E_eq: parameters["E_eq"],
+        j: parameters["j"],
         F_c: F,
         R_c: R,
         T_c: T,
@@ -404,7 +440,7 @@ print(f"Relative difference of phi_e - phi_l: {plain_difference:.1e}")
 assert plain_difference < 1e-10
 # -
 
-# ## Across the electrode
+# ## One-dimensional modelling
 #
 # In one dimension, the same components solve the problem across an
 # electrode of a given width, on an interval of a given number of cells,
@@ -413,14 +449,16 @@ assert plain_difference < 1e-10
 
 
 # +
-def across(width, cells, degree, tolerance):
+def across(
+    width: float, cells: int, degree: int, tolerance: float
+) -> tuple[dolfinx.fem.Function, float]:
     interval = dolfinx.mesh.create_interval(
         MPI.COMM_WORLD, cells, [0.0, width], dtype=dtype
     )
     line = symbolic.Domain.from_mesh("line", interval, length_scale=width)
-    phi_e, phi_l = potentials(line, degree)
+    phi_e, phi_l = create_potentials(line, degree)
     model, reaction = electrode(
-        parameters(line), Electrolyte("electrolyte", line), phi_e, phi_l
+        create_parameters(line), Electrolyte("electrolyte", line), phi_e, phi_l
     )
     disc = solve(
         model, discrete.DomainMaps({line: mark(interval, 0, width, tolerance)})
@@ -436,11 +474,11 @@ def across(width, cells, degree, tolerance):
 
 # +
 eta_1d, reacted_1d = across(width, cells_across, degree, tolerance)
-print(f"Reacted over applied current: {reacted_1d / p['j'].default_si}")
-assert np.isclose(reacted_1d, p["j"].default_si, rtol=1e-8)
+print(f"Reacted over applied current: {reacted_1d / parameters['j'].default_si}")
+assert np.isclose(reacted_1d, parameters["j"].default_si, rtol=1e-8)
 # -
 
-# ## In three dimensions
+# ## Three-dimensional modelling
 #
 # A box of hexahedra, finely resolved across the electrode and coarsely
 # along it, where the solution is constant. The reaction carries the applied
@@ -455,16 +493,16 @@ box = dolfinx.mesh.create_box(
     dtype=dtype,
 )
 solid = symbolic.Domain.from_mesh("box", box, length_scale=width)
-p_3d = parameters(solid)
-phi_e_3d, phi_l_3d = potentials(solid, degree)
+parameters_3d = create_parameters(solid)
+phi_e_3d, phi_l_3d = create_potentials(solid, degree)
 model_3d, reaction_3d = electrode(
-    p_3d, Electrolyte("electrolyte", solid), phi_e_3d, phi_l_3d
+    parameters_3d, Electrolyte("electrolyte", solid), phi_e_3d, phi_l_3d
 )
 disc_3d = solve(model_3d, discrete.DomainMaps({solid: mark(box, 2, width, tolerance)}))
 eta_3d = overpotential(disc_3d, phi_e_3d, reaction_3d)
 
 reacted_3d = disc_3d.assemble_scalar(reaction_3d.source() * solid.dx())
-applied_3d = p_3d["j"].default_si * height**2
+applied_3d = parameters_3d["j"].default_si * height**2
 print(f"Reacted over applied current: {reacted_3d / applied_3d}")
 assert np.isclose(reacted_3d, applied_3d, rtol=1e-8)
 # -
@@ -486,28 +524,37 @@ assert np.isclose(reacted_3d, applied_3d, rtol=1e-8)
 # \end{aligned}
 # $$ (overpotential-equation)
 #
-# a diffusion with a source, written with
-# {py:class}`Diffusion <sumfem.models.Diffusion>`,
+# a diffusion with a source. The reduction has no model of
+# electrochemistry: it is one equation for one field, derived for constant
+# conductivities. It is written, as in {ref}`electrode-generic`, with the
+# generic components {py:class}`Diffusion <sumfem.models.Diffusion>`,
 # {py:class}`Source <sumfem.models.Source>` and
-# {py:class}`BoundaryFlux <sumfem.models.BoundaryFlux>`, on the rectangle.
-# Integrating it shows that the reaction carries the applied current here
-# too:
+# {py:class}`BoundaryFlux <sumfem.models.BoundaryFlux>` and the parameters
+# $F$, $R$ and $T$ defined there, on the rectangle. Integrating it shows
+# that the reaction carries the applied current here too:
 
 # +
 eta_field = symbolic.Field("eta", domain, ("Lagrange", degree), unit=V, scale=0.1)
-thermal = electrolyte.R * electrolyte.T / electrolyte.F
-current_density = butler_volmer(p["i0"], eta_field / thermal, 0.5, 0.5)
-resistivity = 1 / p["sigma"] + 1 / p["kappa"]
+thermal = R * T / F
+current_density = butler_volmer(parameters["i0"], eta_field / thermal, 0.5, 0.5)
+resistivity = 1 / parameters["sigma"] + 1 / parameters["kappa"]
 reduced = (
     Diffusion("diffusion", eta_field, 1.0)
-    + Source("reaction", eta_field, -resistivity * p["a"] * current_density)
-    + BoundaryFlux("collector", eta_field, p["j"] / p["sigma"], ("CurrentCollector",))
-    + BoundaryFlux("membrane", eta_field, p["j"] / p["kappa"], ("Membrane",))
+    + Source("reaction", eta_field, -resistivity * parameters["a"] * current_density)
+    + BoundaryFlux(
+        "collector",
+        eta_field,
+        parameters["j"] / parameters["sigma"],
+        ("CurrentCollector",),
+    )
+    + BoundaryFlux(
+        "membrane", eta_field, parameters["j"] / parameters["kappa"], ("Membrane",)
+    )
 )
 disc_eta = solve(reduced, maps)
 eta_reduced = disc_eta.function(eta_field)
 
-reacted_eta = disc_eta.assemble_scalar(p["a"] * current_density * domain.dx())
+reacted_eta = disc_eta.assemble_scalar(parameters["a"] * current_density * domain.dx())
 print(f"Reacted over applied current: {reacted_eta / applied}")
 assert np.isclose(reacted_eta, applied, rtol=1e-8)
 # -
@@ -534,18 +581,24 @@ assert np.isclose(reacted_eta, applied, rtol=1e-8)
 
 
 # +
-def reference_solution(p, electrolyte, points, tolerance, max_nodes):
+def reference_solution(
+    parameters: dict[str, symbolic.Parameter],
+    electrolyte: Electrolyte,
+    points: np.ndarray,
+    tolerance: float,
+    max_nodes: int,
+) -> Callable[[np.ndarray], np.ndarray]:
     sigma, kappa, a, i0, j = (
-        p[n].default_si for n in ("sigma", "kappa", "a", "i0", "j")
+        parameters[n].default_si for n in ("sigma", "kappa", "a", "i0", "j")
     )
     F, R, T = (c.default_si for c in (electrolyte.F, electrolyte.R, electrolyte.T))
 
-    def system(x, y):
+    def system(x: np.ndarray, y: np.ndarray) -> np.ndarray:
         eta, current = y
         reaction = i0 * 2 * np.sinh(F * eta / (2 * R * T))
         return np.vstack([(current - j) / sigma + current / kappa, a * reaction])
 
-    def boundary(y0, yW):
+    def boundary(y0: np.ndarray, yW: np.ndarray) -> np.ndarray:
         return np.array([y0[1], yW[1] - j])
 
     solution = solve_bvp(
@@ -570,7 +623,11 @@ def reference_solution(p, electrolyte, points, tolerance, max_nodes):
 # above what the refinement needs, leave it room to:
 
 reference = reference_solution(
-    p, electrolyte, np.linspace(0, width, 100), tolerance=1e-9, max_nodes=100_000
+    parameters,
+    electrolyte,
+    np.linspace(0, width, 100),
+    tolerance=1e-9,
+    max_nodes=100_000,
 )
 
 # Each solution is compared with it on a line across the middle of its
@@ -580,7 +637,14 @@ reference = reference_solution(
 
 
 # +
-def line_error(eta, reference, start, end, degree, points):
+def line_error(
+    eta: dolfinx.fem.Function,
+    reference: Callable[[np.ndarray], np.ndarray],
+    start: Sequence[float],
+    end: Sequence[float],
+    degree: int,
+    points: int,
+) -> float:
     line = interpolate_to_line(eta, start, end, points, ("Lagrange", degree))
     x = line.function_space.tabulate_dof_coordinates()[:, 0]
     expected = dolfinx.fem.Function(line.function_space)
@@ -624,10 +688,10 @@ plt.show()
 # (electrode-convergence)=
 # ### Convergence
 #
-# For a smooth solution, the error of Lagrange elements of degree $p$ in the
-# $L^2$ norm falls as $h^{p+1}$ with the cell size $h$, see the duality
-# estimates in Chapter 0 of {cite}`BrennerScott2008`. Halving the cell
-# size divides the error by $2^{p+1}$, so the observed rate
+# For a smooth solution, Lagrange elements of degree $p$ are known to
+# converge at order $p + 1$ in the $L^2$ norm as the cell size $h$ is
+# refined, see Chapter 0 of {cite}`BrennerScott2008`. Halving the cell size
+# divides the error by $2^{p+1}$, so the observed rate
 #
 # $$
 # r = \log_2 \frac{e_h}{e_{h/2}}
@@ -642,13 +706,17 @@ plt.show()
 
 
 # +
-def l2_error(eta, reference, degree):
+def l2_error(
+    eta: dolfinx.fem.Function,
+    reference: Callable[[np.ndarray], np.ndarray],
+    degree: int,
+) -> float:
     mesh = eta.function_space.mesh
     space = dolfinx.fem.functionspace(mesh, ("Lagrange", degree + 2))
     expected = dolfinx.fem.Function(space)
     expected.interpolate(lambda x: reference(x[0]))
 
-    def integral(expression):
+    def integral(expression: ufl.core.expr.Expr) -> float:
         form = dolfinx.fem.form(expression**2 * ufl.dx)
         return mesh.comm.allreduce(dolfinx.fem.assemble_scalar(form), op=MPI.SUM)
 
@@ -664,7 +732,6 @@ def l2_error(eta, reference, degree):
 
 # +
 refinements = (8, 16, 32)
-scientific = {"float_kind": lambda value: f"{value:.1e}"}
 for p_degree in (1, 2, 3):
     errors_h = np.array(
         [
@@ -674,8 +741,8 @@ for p_degree in (1, 2, 3):
     )
     rates = np.log2(errors_h[:-1] / errors_h[1:])
     print(
-        f"Degree {p_degree}: errors {np.array2string(errors_h, formatter=scientific)}, "
-        f"rates {np.array2string(rates, precision=2)}"
+        f"Degree {p_degree}: errors {', '.join(f'{e:.1e}' for e in errors_h)}, "
+        f"rates {', '.join(f'{r:.2f}' for r in rates)}"
     )
     assert (rates > p_degree + 0.5).all()
 # -
@@ -694,10 +761,14 @@ for p_degree in (1, 2, 3):
 
 # +
 thick = 10 * width
-thick_tolerance = 100 * np.finfo(dtype).eps * thick
+thick_tolerance = 100 * float(np.finfo(dtype).eps) * thick
 eta_thick, _ = across(thick, 4 * cells_across, degree, thick_tolerance)
 reference_thick = reference_solution(
-    p, electrolyte, np.linspace(0, thick, 100), tolerance=1e-9, max_nodes=100_000
+    parameters,
+    electrolyte,
+    np.linspace(0, thick, 100),
+    tolerance=1e-9,
+    max_nodes=100_000,
 )
 error_thick = l2_error(eta_thick, reference_thick, degree)
 print(f"Thick electrode: relative error {error_thick:.1e}")
