@@ -53,7 +53,40 @@ __all__ = [
     "JacobianSum",
     "Residual",
     "ResidualSum",
+    "input_or_parameter",
 ]
+
+
+def input_or_parameter(
+    name: str,
+    value: ufl.core.expr.Expr | npt.ArrayLike | None,
+    domain: Domain,
+    *,
+    shape: tuple[int, ...] = (),
+    default: npt.ArrayLike | None = None,
+    unit: Unit | None = None,
+    doc: str = "",
+) -> ufl.core.expr.Expr:
+    """An input given as a value, or else a new parameter named ``name``.
+
+    As :meth:`Component.input`, for code that is not a component and names
+    its parameters itself, such as a sum of components under one name, whose
+    summands share its parameters, or a container of the parameters of
+    several models.
+
+    Args:
+        name: The full name of the parameter, e.g. ``"<model>.<input>"``.
+        value: The value, converted with :func:`as_expr`, or ``None`` for
+            the parameter.
+        domain: The domain of the parameter.
+        shape: The shape of the parameter.
+        default: The default value of the parameter.
+        unit: The unit of the parameter.
+        doc: A description of the parameter.
+    """
+    if value is not None:
+        return as_expr(value)
+    return Parameter(name, domain, shape=shape, default=default, unit=unit, doc=doc)
 
 
 class Component:

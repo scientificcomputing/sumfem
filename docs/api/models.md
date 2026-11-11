@@ -42,7 +42,44 @@
 ## Interfaces
 
 ```{eval-rst}
-.. autoclass:: InterfaceConstraint
+.. autoclass:: InterfaceLagrangeMultiplier
+   :members:
+
+.. autoclass:: InterfacePenalty
+   :members:
+
+.. autoclass:: InterfacePenaltyEnergy
+   :members:
+```
+
+## Flow
+
+```{eval-rst}
+.. autoclass:: Darcy
+   :members:
+
+.. autoclass:: Stokes
+   :members:
+
+.. autoclass:: Convection
+   :members:
+
+.. autoclass:: DarcyDrag
+   :members:
+
+.. autoclass:: ForchheimerDrag
+   :members:
+
+.. autoclass:: GradDiv
+   :members:
+
+.. autoclass:: NavierStokes
+   :members:
+
+.. autoclass:: Brinkman
+   :members:
+
+.. autoclass:: BrinkmanForchheimer
    :members:
 ```
 
