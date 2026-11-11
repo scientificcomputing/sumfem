@@ -1,6 +1,9 @@
 """The RFBniCS models: units, structure, schedules and post-processing."""
 
+from mpi4py import MPI
+
 import dolfinx.fem
+import dolfinx.la
 import numpy as np
 import pytest
 import sympy.physics.units as syu
@@ -166,12 +169,26 @@ def test_the_couple_is_oxidized_or_reduced_on_discharge(reference):
         # the equations of the potentials
         disc.set({cell.current: 0.5})
         problem = disc[system]
-        residuals.append(
-            [dolfinx.fem.assemble_vector(form).array for form in problem.residual[:2]]
-        )
+        residuals.append([owned_residual(form) for form in problem.residual[:2]])
+    # Each process may hold only one of the boundaries, so the checks are
+    # over all processes, which all reach the same verdict
+    comm = marked.mesh.comm
     for oxidizing, reducing in zip(*residuals, strict=True):
-        assert np.abs(oxidizing).max() > 0
-        np.testing.assert_allclose(oxidizing, -reducing)
+        largest = comm.allreduce(np.abs(oxidizing).max(initial=0.0), op=MPI.MAX)
+        mismatch = comm.allreduce(
+            np.abs(oxidizing + reducing).max(initial=0.0), op=MPI.MAX
+        )
+        assert largest > 0
+        assert mismatch <= 1e-12 * largest
+
+
+def owned_residual(form: dolfinx.fem.Form) -> np.ndarray:
+    """A residual vector with its ghost contributions added to their owners,
+    restricted to the entries this process owns."""
+    vector = dolfinx.fem.assemble_vector(form)
+    vector.scatter_reverse(dolfinx.la.InsertMode.add)
+    size = vector.index_map.size_local * vector.block_size
+    return vector.array[:size].copy()
 
 
 def test_the_reservoir_names_ions_of_the_electrolyte(reference):
