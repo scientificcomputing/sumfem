@@ -13,7 +13,6 @@ import sympy.physics.units as syu
 import ufl
 from basix.ufl import element
 
-from sumfem.discrete import Discretization, DomainMaps, discretize
 from sumfem.models import (
     BoundaryConstraint,
     BoundaryFlux,
@@ -33,48 +32,12 @@ CELLS = ["interval", "triangle", "quadrilateral", "tetrahedron", "hexahedron"]
 """The cell types each comparison runs on."""
 
 DOMAIN = "box"
-"""The name of the symbolic domain of both formulations.
-
-The plain forms name their mesh so with ``names``, the models create their
-domain with it, and ``DomainMaps`` binds the mesh data to the domain by it.
-"""
-
-
-def assign_random_data(disc: Discretization, field: Field, seed: int) -> None:
-    """Set a field to random values, so that nonlinear terms are exercised."""
-    function = disc.function(field)
-    rng = np.random.default_rng(seed=seed + 100 * disc.comm.rank)
-    function.x.array[:] = rng.uniform(0.5, 1.5, function.x.array.size)
-    function.x.scatter_forward()
-
-
-def compare(plain, plain_fields, model, fields, mesh_data, same_assembly, values=()):
-    """Discretize both on the same mesh data, at the same random values.
-
-    Args:
-        plain: The ``UFLResidual``.
-        plain_fields: Its fields, in the order of ``fields``.
-        model: The model.
-        fields: The model's fields.
-        mesh_data: The mesh data of both.
-        same_assembly: The fixture.
-        values: Parameter values of each, as pairs of mappings ``(plain, model)``.
-    """
-    disc_plain = discretize([plain], DomainMaps({DOMAIN: mesh_data}))
-    disc_model = discretize([model], DomainMaps({DOMAIN: mesh_data}))
-    for plain_values, model_values in values:
-        disc_plain.set(plain_values)
-        disc_model.set(model_values)
-    for seed, (plain_field, field) in enumerate(zip(plain_fields, fields, strict=True)):
-        assign_random_data(disc_plain, plain_field, seed)
-        values_of_plain = disc_plain.function(plain_field).x.array
-        disc_model.function(field).x.array[:] = values_of_plain
-    same_assembly(disc_model[model], disc_plain[plain])
+"""The name of the symbolic domain of both formulations, see ``compare``."""
 
 
 @pytest.mark.parametrize("coefficient", ["parameter", "matrix", "nonlinear"])
 @pytest.mark.parametrize("cell", CELLS)
-def test_diffusion(cell, coefficient, ufl_functionspace, box, same_assembly):
+def test_diffusion(cell, coefficient, ufl_functionspace, box, compare):
     """Diffusion with a scalar parameter, a matrix, or a coefficient of the
     field, restricted to the cells of a marker.
     """
@@ -101,11 +64,11 @@ def test_diffusion(cell, coefficient, ufl_functionspace, box, same_assembly):
     model = Diffusion("d", u, model_k, markers=("LeftHalf",))
     is_parameter = coefficient == "parameter"
     values = [({"plain.kappa": 2.5}, {"d.coefficient": 2.5})] if is_parameter else []
-    compare(plain, [plain.field], model, [u], box(cell), same_assembly, values)
+    compare(plain, [plain.field], model, [u], box(cell), values)
 
 
 @pytest.mark.parametrize("cell", CELLS)
-def test_source_of_a_vector_field(cell, ufl_functionspace, box, same_assembly):
+def test_source_of_a_vector_field(cell, ufl_functionspace, box, compare):
     """A source of a vector field, a vector parameter by default, with diffusion:
     a source alone does not depend on the field, so its Jacobian is empty.
     """
@@ -120,11 +83,11 @@ def test_source_of_a_vector_field(cell, ufl_functionspace, box, same_assembly):
     model = Diffusion("d", u, 1.0) + Source("s", u)
     value = np.arange(1.0, gdim + 1.0)
     values = [({"plain.f": value}, {"s.source": value})]
-    compare(plain, [plain.field], model, [u], box(cell), same_assembly, values)
+    compare(plain, [plain.field], model, [u], box(cell), values)
 
 
 @pytest.mark.parametrize("cell", CELLS)
-def test_poisson(cell, ufl_functionspace, box, same_assembly):
+def test_poisson(cell, ufl_functionspace, box, compare):
     """Poisson's equation, with its coefficient one by default and a source
     that depends on the coordinates.
     """
@@ -138,11 +101,11 @@ def test_poisson(cell, ufl_functionspace, box, same_assembly):
     u = Field("u", domain, ("Lagrange", 2))
     x = ufl.SpatialCoordinate(domain)
     model = Poisson("p", u, source=ufl.sin(3 * x[0]))
-    compare(plain, [plain.field], model, [u], box(cell), same_assembly)
+    compare(plain, [plain.field], model, [u], box(cell))
 
 
 @pytest.mark.parametrize("cell", CELLS)
-def test_boundary_flux_and_outflow(cell, ufl_functionspace, box, same_assembly):
+def test_boundary_flux_and_outflow(cell, ufl_functionspace, box, compare):
     """A flux into the domain through one side, and advection out of another,
     on the facets of their markers.
     """
@@ -166,11 +129,11 @@ def test_boundary_flux_and_outflow(cell, ufl_functionspace, box, same_assembly):
     inflow = BoundaryFlux("in", c, 2.0, markers=("Left",))
     model = inflow + Outflow("out", c, velocity, markers=("Right",))
     values = [({"plain.q": 2.0}, {})]
-    compare(plain, [plain.field], model, [c], box(cell), same_assembly, values)
+    compare(plain, [plain.field], model, [c], box(cell), values)
 
 
 @pytest.mark.parametrize("cell", CELLS)
-def test_dirichlet_multiplier(cell, ufl_functionspace, box, same_assembly):
+def test_dirichlet_multiplier(cell, ufl_functionspace, box, compare):
     """A Dirichlet condition with a Lagrange multiplier, the two fields on a
     mixed space, the multiplier here on the whole mesh.
     """
@@ -195,12 +158,12 @@ def test_dirichlet_multiplier(cell, ufl_functionspace, box, same_assembly):
     lam = Field("lambda", domain, ("Lagrange", 1))
     model = DirichletMultiplier("m", u, lam, markers=("Left",))
     values = [({"plain.g": 0.5}, {"m.value": 0.5})]
-    compare(plain, plain.unknowns, model, [u, lam], box(cell), same_assembly, values)
+    compare(plain, plain.unknowns, model, [u, lam], box(cell), values)
 
 
 @pytest.mark.parametrize("constraint", ["normal", "nonlinear"])
 @pytest.mark.parametrize("cell", CELLS)
-def test_boundary_constraint(cell, constraint, ufl_functionspace, box, same_assembly):
+def test_boundary_constraint(cell, constraint, ufl_functionspace, box, compare):
     """A constraint with a Lagrange multiplier of its own shape: the normal
     component of a vector field, or a nonlinear constraint of a scalar one,
     whose derivative enters the equation of the field.
@@ -230,12 +193,12 @@ def test_boundary_constraint(cell, constraint, ufl_functionspace, box, same_asse
     model_c = ufl.dot(u, n_model) - 0.5 if constraint == "normal" else u**2 - 0.5
     model = BoundaryConstraint("c", u, lam, model_c, markers=("Left",))
     values = [({"plain.g": 0.5}, {})]
-    compare(plain, plain.unknowns, model, [u, lam], box(cell), same_assembly, values)
+    compare(plain, plain.unknowns, model, [u, lam], box(cell), values)
 
 
 @pytest.mark.parametrize("reaction", ["mass action", "rate"])
 @pytest.mark.parametrize("cell", CELLS)
-def test_reactions(cell, reaction, ufl_functionspace, box, same_assembly):
+def test_reactions(cell, reaction, ufl_functionspace, box, compare):
     """``A + 2 B <-> C``: each species gets its coefficient times the rate in
     its equation, reactants with a plus and products with a minus sign.
     """
@@ -265,7 +228,7 @@ def test_reactions(cell, reaction, ufl_functionspace, box, same_assembly):
             "r", reactants, products, rate=1.7 * a * ufl.exp(-b) - kb * c**2
         )
         values = [({"plain.kf": 1.7}, {})]
-    compare(plain, plain.unknowns, model, [a, b, c], box(cell), same_assembly, values)
+    compare(plain, plain.unknowns, model, [a, b, c], box(cell), values)
 
 
 def test_arrhenius_is_the_arrhenius_law():

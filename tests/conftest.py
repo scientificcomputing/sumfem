@@ -18,7 +18,7 @@ import pytest
 import ufl
 from basix.ufl import element
 
-from sumfem.discrete import MeshData
+from sumfem.discrete import Discretization, DomainMaps, MeshData, discretize
 from sumfem.symbolic import Domain, Field, Residual
 
 SIDES = ("Left", "Right", "Bottom", "Top")
@@ -274,3 +274,52 @@ def assert_same_assembly(first, second, rtol: float = 1e-12):
 def same_assembly():
     """The comparison of two discrete systems, :func:`assert_same_assembly`."""
     return assert_same_assembly
+
+
+COMPARISON_DOMAIN = "box"
+"""The name of the symbolic domain of both formulations of a comparison.
+
+The plain forms name their mesh so with ``names``, the models create their
+domain with it, and ``DomainMaps`` binds the mesh data to the domain by it.
+"""
+
+
+def assign_random_data(disc: Discretization, field: Field, seed: int) -> None:
+    """Set a field to random values, so that nonlinear terms are exercised."""
+    function = disc.function(field)
+    rng = np.random.default_rng(seed=seed + 100 * disc.comm.rank)
+    function.x.array[:] = rng.uniform(0.5, 1.5, function.x.array.size)
+    function.x.scatter_forward()
+
+
+def compare_with_ufl(plain, plain_fields, model, fields, mesh_data, values=()):
+    """Assert that a model assembles as its formulation in plain UFL.
+
+    Both are discretized on the same mesh data, at the same random values of
+    their fields, and compared with :func:`assert_same_assembly`.
+
+    Args:
+        plain: The ``UFLResidual``.
+        plain_fields: Its fields, in the order of ``fields``.
+        model: The model.
+        fields: The model's fields.
+        mesh_data: The mesh data of both.
+        values: Parameter values of each, as pairs of mappings ``(plain, model)``.
+    """
+    maps = {COMPARISON_DOMAIN: mesh_data}
+    disc_plain = discretize([plain], DomainMaps(maps))
+    disc_model = discretize([model], DomainMaps(maps))
+    for plain_values, model_values in values:
+        disc_plain.set(plain_values)
+        disc_model.set(model_values)
+    for seed, (plain_field, field) in enumerate(zip(plain_fields, fields, strict=True)):
+        assign_random_data(disc_plain, plain_field, seed)
+        values_of_plain = disc_plain.function(plain_field).x.array
+        disc_model.function(field).x.array[:] = values_of_plain
+    assert_same_assembly(disc_model[model], disc_plain[plain])
+
+
+@pytest.fixture
+def compare():
+    """The comparison of a model with plain UFL, :func:`compare_with_ufl`."""
+    return compare_with_ufl

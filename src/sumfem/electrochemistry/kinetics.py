@@ -455,9 +455,9 @@ class MassTransferButlerVolmer(ButlerVolmer):
         fiber_diameter: Fiber diameter ``d``. Defaults to the parameter
             ``"<name>.fiber_diameter"`` in m.
         density: Density ``rho`` of the electrolyte. Defaults to the
-            parameter ``"<name>.density"`` in kg/m^3.
+            :attr:`~Electrolyte.density` of the electrolyte.
         viscosity: Dynamic viscosity ``mu`` of the electrolyte. Defaults to
-            the parameter ``"<name>.viscosity"`` in Pa s.
+            the :attr:`~Electrolyte.viscosity` of the electrolyte.
         sherwood_factor: The factor ``a`` of the Sherwood number.
         reynolds_exponent: The exponent ``b`` of the Sherwood number.
         speed_floor: Regularization of ``|u|``, in m/s.
@@ -543,19 +543,27 @@ class MassTransferButlerVolmer(ButlerVolmer):
             unit=syu.m,
             doc="Fiber diameter",
         )
-        self._density = self.input(
-            "density",
-            density,
-            domain=domain,
-            unit=syu.kg / syu.m**3,
-            doc="Density of the electrolyte",
+        self._density = (
+            electrolyte.density
+            if density is None
+            else self.input(
+                "density",
+                density,
+                domain=domain,
+                unit=syu.kg / syu.m**3,
+                doc="Density of the electrolyte",
+            )
         )
-        self._viscosity = self.input(
-            "viscosity",
-            viscosity,
-            domain=domain,
-            unit=syu.pascal * syu.second,
-            doc="Dynamic viscosity of the electrolyte",
+        self._viscosity = (
+            electrolyte.viscosity
+            if viscosity is None
+            else self.input(
+                "viscosity",
+                viscosity,
+                domain=domain,
+                unit=syu.pascal * syu.second,
+                doc="Dynamic viscosity of the electrolyte",
+            )
         )
         self._sherwood_factor = sherwood_factor
         self._reynolds_exponent = reynolds_exponent
