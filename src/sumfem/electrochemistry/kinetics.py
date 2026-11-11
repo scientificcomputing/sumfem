@@ -7,6 +7,8 @@ The Butler-Volmer equation, :func:`~sumfem.models.butler_volmer`, goes back to
 
 from __future__ import annotations
 
+import typing
+
 import numpy.typing as npt
 import sympy.physics.units as syu
 import ufl
@@ -21,6 +23,7 @@ __all__ = [
     "ElectrodeReaction",
     "ExchangeCurrentButlerVolmer",
     "MassTransferButlerVolmer",
+    "PistonVelocityButlerVolmer",
 ]
 
 INPUT = ufl.core.expr.Expr | npt.ArrayLike | None
@@ -33,8 +36,9 @@ class ElectrodeReaction(Residual):
     The volumetric current ``f = a i``, with the specific area ``a`` and the
     interfacial current density ``i`` of :meth:`current_density`, leaves the
     solid and enters the electrolyte. It consumes the reduced species and
-    produces the oxidized one at the rate ``f / (n F)``. Species without a
-    field get no source. Subclasses give the kinetics.
+    produces the oxidized one at the rate ``f / (n F)``, and every other
+    species of the reaction, e.g. protons or water, ``nu`` times as much.
+    Species without a field get no source. Subclasses give the kinetics.
 
     Args:
         name: Name of the model.
@@ -47,6 +51,10 @@ class ElectrodeReaction(Residual):
             ``"<name>.specific_area"`` in 1/m.
         electrons: Number of electrons ``n`` transferred.
         markers: Cell markers of the electrode. Empty for the whole domain.
+        others: Other species of the reaction: concentrations with the moles
+            ``nu`` of each produced per mole oxidized, negative for one
+            consumed. E.g. VO2+ + H2O -> VO2+ + 2 H+ + e- produces two protons
+            and consumes one water.
     """
 
     _solid_potential: Field
@@ -73,6 +81,10 @@ class ElectrodeReaction(Residual):
     _markers: tuple[str, ...]
     """Cell markers of the electrode."""
 
+    _others: tuple[tuple[ufl.core.expr.Expr, float], ...]
+    """Other species of the reaction, with the moles produced per mole
+    oxidized."""
+
     def __init__(
         self,
         name: str,
@@ -84,6 +96,7 @@ class ElectrodeReaction(Residual):
         specific_area: INPUT = None,
         electrons: int = 1,
         markers: tuple[str, ...] = (),
+        others: typing.Sequence[tuple[ufl.core.expr.Expr, float]] = (),
     ):
         super().__init__(name)
         self._solid_potential = solid_potential
@@ -100,6 +113,7 @@ class ElectrodeReaction(Residual):
         )
         self._electrons = electrons
         self._markers = tuple(markers)
+        self._others = tuple((c, float(nu)) for c, nu in others)
 
     @property
     def electrolyte(self) -> Electrolyte:
@@ -126,13 +140,15 @@ class ElectrodeReaction(Residual):
         dx = self._solid_potential.domain.dx(*self._markers)
         F = f * self._solid_potential.v * dx - f * self._electrolyte_potential.v * dx
         rate = f / (self._electrons * self._electrolyte.F)
+        # The residual of a species gains what the reaction consumes
         species = (
             (self._reduced_concentration, 1.0),
             (self._oxidized_concentration, -1.0),
+            *((c, -nu) for c, nu in self._others),
         )
-        for c, sign in species:
+        for c, consumed in species:
             if isinstance(c, Field):
-                F += sign * rate * c.v * dx
+                F += consumed * rate * c.v * dx
         return F
 
 
@@ -290,6 +306,13 @@ class ButlerVolmer(ElectrodeReaction):
             Defaults to the parameter ``"<name>.cathodic_transfer"``, 0.5.
         electrons: See :class:`ElectrodeReaction`.
         markers: See :class:`ElectrodeReaction`.
+        stoichiometry: Other ions of the reaction, by name, with the moles
+            produced per mole of the reduced ion oxidized, see ``others`` of
+            :class:`ElectrodeReaction`.
+
+    Raises:
+        ValueError: If an ion of the stoichiometry has no field, as the ion
+            that follows from electroneutrality.
     """
 
     _reduced: Ion
@@ -325,7 +348,15 @@ class ButlerVolmer(ElectrodeReaction):
         cathodic_transfer: INPUT = None,
         electrons: int = 1,
         markers: tuple[str, ...] = (),
+        stoichiometry: typing.Mapping[str, float] | None = None,
     ):
+        stoichiometry = dict(stoichiometry or {})
+        for ion in stoichiometry:
+            if electrolyte[ion].concentration is None:
+                raise ValueError(
+                    f"Ion {ion!r} of the reaction follows from electroneutrality, "
+                    "so it has no field to produce or consume."
+                )
         super().__init__(
             name,
             solid_potential,
@@ -336,6 +367,7 @@ class ButlerVolmer(ElectrodeReaction):
             specific_area=specific_area,
             electrons=electrons,
             markers=markers,
+            others=[(electrolyte[ion].field, nu) for ion, nu in stoichiometry.items()],
         )
         domain = solid_potential.domain
         self._reduced = electrolyte[reduced]
@@ -522,6 +554,7 @@ class MassTransferButlerVolmer(ButlerVolmer):
         cathodic_transfer: INPUT = None,
         electrons: int = 1,
         markers: tuple[str, ...] = (),
+        stoichiometry: typing.Mapping[str, float] | None = None,
     ):
         super().__init__(
             name,
@@ -537,6 +570,7 @@ class MassTransferButlerVolmer(ButlerVolmer):
             cathodic_transfer=cathodic_transfer,
             electrons=electrons,
             markers=markers,
+            stoichiometry=stoichiometry,
         )
         domain = solid_potential.domain
         self._velocity = as_expr(velocity)
@@ -609,12 +643,115 @@ class MassTransferButlerVolmer(ButlerVolmer):
         self,
     ) -> tuple[ufl.core.expr.Expr, ufl.core.expr.Expr]:
         """Surface concentrations balancing reaction and mass transfer."""
-        k_a, k_c = self.rate_constants()
         m_red, m_ox = (
             m + self._transfer_floor for m in self.mass_transfer_coefficients()
         )
-        c_red, c_ox = self._bulk()
-        denominator = 1.0 + k_a / m_red + k_c / m_ox
-        surface_ox = ((1.0 + k_a / m_red) * c_ox + k_a / m_ox * c_red) / denominator
-        surface_red = ((1.0 + k_c / m_ox) * c_red + k_c / m_red * c_ox) / denominator
-        return surface_red, surface_ox
+        return _balanced_surface(*self.rate_constants(), m_red, m_ox, *self._bulk())
+
+
+def _balanced_surface(
+    k_a: ufl.core.expr.Expr,
+    k_c: ufl.core.expr.Expr,
+    m_red: ufl.core.expr.Expr,
+    m_ox: ufl.core.expr.Expr,
+    c_red: ufl.core.expr.Expr,
+    c_ox: ufl.core.expr.Expr,
+) -> tuple[ufl.core.expr.Expr, ufl.core.expr.Expr]:
+    """Surface concentrations where mass transfer balances the reaction.
+
+    The solution of ``m_red (c_red - s_red) = k_a s_red - k_c s_ox`` and
+    ``m_ox (c_ox - s_ox) = -(k_a s_red - k_c s_ox)``, see equation 20 of
+    `Aghabarari et al., 2026 <https://arxiv.org/abs/2610.01840>`_.
+    """
+    denominator = 1.0 + k_a / m_red + k_c / m_ox
+    surface_ox = ((1.0 + k_a / m_red) * c_ox + k_a / m_ox * c_red) / denominator
+    surface_red = ((1.0 + k_c / m_ox) * c_red + k_c / m_red * c_ox) / denominator
+    return surface_red, surface_ox
+
+
+class PistonVelocityButlerVolmer(ButlerVolmer):
+    """Butler-Volmer kinetics limited by diffusion between the fibres.
+
+    The surface concentrations balance the reaction with mass transfer
+    ``gamma (c - c_s)`` from the bulk, with the piston velocity
+    ``gamma = D / delta`` of each ion, its diffusivity in free electrolyte
+    over the mean distance ``delta`` between the fibres, see equations 23
+    and 24 of `Shah et al., 2008
+    <https://doi.org/10.1016/j.electacta.2008.05.067>`_. Unlike
+    :class:`MassTransferButlerVolmer`, the transfer does not depend on the
+    flow.
+
+    Args:
+        name: Name of the model.
+        solid_potential: See :class:`ButlerVolmer`.
+        electrolyte_potential: See :class:`ButlerVolmer`.
+        electrolyte: See :class:`ButlerVolmer`.
+        reduced: See :class:`ButlerVolmer`.
+        oxidized: See :class:`ButlerVolmer`.
+        fiber_distance: Mean distance ``delta`` between the fibres.
+            Defaults to the parameter ``"<name>.fiber_distance"`` in m.
+        transfer_floor: Regularization added to ``gamma``, in m/s.
+        **kwargs: The other arguments of :class:`ButlerVolmer`.
+    """
+
+    _fiber_distance: ufl.core.expr.Expr
+    """Mean distance between the fibres."""
+
+    _transfer_floor: ufl.core.expr.Expr
+    """Regularization of the piston velocities."""
+
+    def __init__(
+        self,
+        name: str,
+        solid_potential: Field,
+        electrolyte_potential: Field,
+        electrolyte: Electrolyte,
+        reduced: str,
+        oxidized: str,
+        fiber_distance: INPUT = None,
+        transfer_floor: float = 1e-14,
+        **kwargs: typing.Any,
+    ):
+        super().__init__(
+            name,
+            solid_potential,
+            electrolyte_potential,
+            electrolyte,
+            reduced,
+            oxidized,
+            **kwargs,
+        )
+        domain = solid_potential.domain
+        self._fiber_distance = self.input(
+            "fiber_distance",
+            fiber_distance,
+            domain=domain,
+            unit=syu.m,
+            doc="Mean distance between the fibres",
+        )
+        self._transfer_floor = self.parameter(
+            "transfer_floor",
+            domain,
+            default=transfer_floor,
+            unit=syu.m / syu.second,
+            doc="Regularization of the piston velocities",
+        )
+
+    def mass_transfer_coefficients(
+        self,
+    ) -> tuple[ufl.core.expr.Expr, ufl.core.expr.Expr]:
+        """The piston velocities ``D / delta`` of the reduced and oxidized ion."""
+        e = self._electrolyte
+        return (
+            e.diffusivity(self._reduced.name) / self._fiber_distance,
+            e.diffusivity(self._oxidized.name) / self._fiber_distance,
+        )
+
+    def surface_concentrations(
+        self,
+    ) -> tuple[ufl.core.expr.Expr, ufl.core.expr.Expr]:
+        """Surface concentrations balancing reaction and mass transfer."""
+        m_red, m_ox = (
+            m + self._transfer_floor for m in self.mass_transfer_coefficients()
+        )
+        return _balanced_surface(*self.rate_constants(), m_red, m_ox, *self._bulk())

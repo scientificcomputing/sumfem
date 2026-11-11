@@ -6,9 +6,10 @@ r"""Models of electrochemistry, built on :mod:`sumfem.models`.
   a cell filled with electrolyte.
 - Charge and transport in the electrolyte: :class:`ElectrolyteConduction`
   and :class:`NernstPlanck`.
-- Kinetics: :class:`ExchangeCurrentButlerVolmer`, :class:`ButlerVolmer`
-  and :class:`MassTransferButlerVolmer`, on :class:`ElectrodeReaction`,
-  with the Butler-Volmer equation :func:`~sumfem.models.butler_volmer`.
+- Kinetics: :class:`ExchangeCurrentButlerVolmer`, :class:`ButlerVolmer`,
+  :class:`MassTransferButlerVolmer` and :class:`PistonVelocityButlerVolmer`,
+  on :class:`ElectrodeReaction`, with the Butler-Volmer equation
+  :func:`~sumfem.models.butler_volmer`.
 - Half-cells of a redox flow battery: :class:`RedoxHalfCell`, negative or
   positive, of any couple and electrolyte.
 
@@ -24,6 +25,7 @@ from .kinetics import (
     ElectrodeReaction,
     ExchangeCurrentButlerVolmer,
     MassTransferButlerVolmer,
+    PistonVelocityButlerVolmer,
 )
 from .porous import PorousElectrode, Region
 from .transport import NernstPlanck
@@ -40,4 +42,5 @@ __all__ = [
     "ElectrodeReaction",
     "ExchangeCurrentButlerVolmer",
     "MassTransferButlerVolmer",
+    "PistonVelocityButlerVolmer",
 ]
