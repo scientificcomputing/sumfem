@@ -78,6 +78,41 @@ def test_output_and_metadata(toy, square, tmp_path):
     assert metadata["meshes"]["cell"]["cell_type"] == "triangle"
 
 
+def test_output_stays_open_across_runs(toy, square, sides, tmp_path):
+    """Runs in parts, with a change of step, write one output until closed."""
+    domain = Domain("cell", "triangle")
+    c = Field("c", domain, ("Lagrange", 1))
+    mean = Field("mean", domain, "Real")
+
+    class MeanOf(Residual):
+        """The mean of c, as a Real field."""
+
+        def residual(self):
+            return (mean - c) * mean.v * domain.dx()
+
+    model = toy.Accumulation("dc", c) + toy.Diffusion("d", c) + MeanOf("m")
+    directory = shared_directory(tmp_path) / "parts"
+    disc = discretize([], DomainMaps({"cell": square()}))
+    clock = Clock(domain, dt=0.5)
+    bcs = [DirichletBC(c, sides, 1.0)]
+    with Simulation(
+        disc, model, bcs, clock=clock, scheme=BDF(2), output=Output(directory)
+    ) as simulation:
+        simulation.run(num_steps=2)
+        # The real fields so far are written after every run
+        MPI.COMM_WORLD.barrier()
+        rows = np.loadtxt(directory / "real_fields.csv", delimiter=",", skiprows=1)
+        np.testing.assert_allclose(rows[:, 0], [0.0, 0.5, 1.0])
+        disc.set({clock.dt: 0.25})
+        simulation.run(num_steps=2)
+    MPI.COMM_WORLD.barrier()
+    rows = np.loadtxt(directory / "real_fields.csv", delimiter=",", skiprows=1)
+    np.testing.assert_allclose(rows[:, 0], [0.0, 0.5, 1.0, 1.25, 1.5])
+    adios2 = pytest.importorskip("adios2")
+    with adios2.FileReader(str(directory / "c.bp")) as reader:
+        assert reader.num_steps() == 5
+
+
 def test_output_writes_only_the_chosen_fields(toy, square, sides, tmp_path):
     domain = Domain("cell", "triangle")
     a = Field("a", domain, ("Lagrange", 1))

@@ -20,6 +20,7 @@ from sumfem.solvers import (
     Solver,
     Theta,
 )
+from sumfem.solvers.time_stepping import _bdf_weights
 from sumfem.symbolic import (
     Clock,
     DirichletBC,
@@ -371,9 +372,140 @@ def test_failed_steps_are_retried_with_shorter_steps(toy, square, sides, monkeyp
     )
 
 
-def test_adapted_steps_need_a_one_step_scheme(toy, square, sides):
-    with pytest.raises(ValueError, match="equal steps"):
-        adaptive_heat(toy, square, sides, AdaptiveTimeStep(0.1), scheme=BDF(2))
+def exact_heat(toy, square, sides, simulation):
+    """The problem of :func:`solve_heat`, run by ``simulation``.
+
+    Returns the simulation, the discretization, the clock and the L2 error
+    at the clock's time.
+    """
+    domain = Domain("cell", "triangle")
+    u = Field("u", domain, ("Lagrange", 2))
+    clock = Clock(domain, dt=0.1)
+    x = ufl.SpatialCoordinate(domain)
+    exact = spatial(x) * (1 + ufl.sin(clock.t))
+    source = spatial(x) * ufl.cos(clock.t) - 6 * (1 + ufl.sin(clock.t))
+    model = (
+        toy.Accumulation("dudt", u)
+        + toy.Diffusion("diffusion", u)
+        + toy.Source("source", u, f=source)
+    )
+    disc = discretize([], DomainMaps({"cell": square()}))
+    run = simulation(disc, model, [DirichletBC(u, sides, exact)], clock)
+    disc.set({u: spatial})
+
+    def error():
+        t = float(disc.value(clock.t))
+        solution = disc.fields["u"]
+        mesh = solution.function_space.mesh
+        xm = ufl.SpatialCoordinate(mesh)
+        local = dolfinx.fem.assemble_scalar(
+            dolfinx.fem.form((solution - spatial(xm) * (1 + np.sin(t))) ** 2 * ufl.dx)
+        )
+        return np.sqrt(mesh.comm.allreduce(local, op=MPI.SUM))
+
+    return run, disc, clock, error
+
+
+@pytest.mark.parametrize("order", [1, 2, 3])
+def test_variable_step_bdf_weights_differentiate_polynomials_exactly(order):
+    """The weights of steps of any sizes are exact for degree up to the order."""
+    steps = [0.3, 0.1, 0.7][:order]
+    times = -np.cumsum([0.0, *steps])
+    weights = _bdf_weights(steps)
+    for degree in range(order + 1):
+        values = times**degree
+        derivative = 1.0 if degree == 1 else 0.0
+        assert np.dot(weights, values) == pytest.approx(derivative, abs=1e-12)
+
+
+def test_equal_steps_give_the_classical_weights():
+    np.testing.assert_allclose(_bdf_weights([0.5, 0.5]), np.array([1.5, -2, 0.5]) / 0.5)
+    np.testing.assert_allclose(_bdf_weights([1.0] * 3), [11 / 6, -3, 1.5, -1 / 3])
+
+
+def test_runs_in_parts_continue_the_history(toy, square, sides):
+    """BDF2 run in two parts takes the steps of one run, numbered alike."""
+    results, numbers = [], []
+    for parts in ([8], [3, 5]):
+        simulation, disc, _, _ = exact_heat(
+            toy,
+            square,
+            sides,
+            lambda disc, model, bcs, clock: Simulation(
+                disc, model, bcs, clock=clock, scheme=BDF(2)
+            ),
+        )
+        steps: list[int] = []
+        for count in parts:
+            simulation.run(num_steps=count, callback=lambda t, n: steps.append(n))
+        results.append(disc.fields["u"].x.array.copy())
+        numbers.append(steps)
+        assert simulation.steps_taken == 8
+    np.testing.assert_allclose(results[1], results[0], rtol=1e-12, atol=1e-14)
+    assert numbers[0] == numbers[1] == list(range(1, 9))
+
+
+def test_a_restart_starts_afresh(toy, square, sides):
+    """After a restart, a run from new values steps as a new simulation."""
+    results, numbers = [], []
+    for restart in (False, True):
+        simulation, disc, clock, _ = exact_heat(
+            toy,
+            square,
+            sides,
+            lambda disc, model, bcs, clock: Simulation(
+                disc, model, bcs, clock=clock, scheme=BDF(2)
+            ),
+        )
+        if restart:
+            simulation.run(num_steps=3)
+            simulation.restart()
+            disc.set({clock.t: 0.0, disc.terminal("u"): spatial})
+        steps: list[int] = []
+        simulation.run(num_steps=4, callback=lambda t, n: steps.append(n))
+        results.append(disc.fields["u"].x.array.copy())
+        numbers.append(steps)
+    np.testing.assert_allclose(results[1], results[0], rtol=1e-12, atol=1e-14)
+    assert numbers[0] == numbers[1] == [1, 2, 3, 4]
+
+
+def test_bdf2_keeps_its_order_when_the_step_changes_between_runs(toy, square, sides):
+    """Steps halved halfway, which constant-step weights would bring to order one."""
+    errors = []
+    for dt in (0.1, 0.05, 0.025):
+        simulation, disc, clock, error = exact_heat(
+            toy,
+            square,
+            sides,
+            lambda disc, model, bcs, clock: Simulation(
+                disc, model, bcs, clock=clock, scheme=BDF(2)
+            ),
+        )
+        disc.set({clock.dt: dt})
+        simulation.run(t_end=0.4)
+        disc.set({clock.dt: dt / 2})
+        simulation.run(t_end=1.0)
+        errors.append(error())
+    rates = np.log2(np.array(errors[:-1]) / np.array(errors[1:]))
+    assert np.all(rates > 1.85), rates
+
+
+def test_adapted_steps_keep_the_accuracy_of_bdf2(toy, square, sides):
+    """BDF2 with growing steps is far more accurate than backward Euler."""
+    rules = AdaptiveTimeStep(0.01, growth_factor=1.2, target_iterations=2, max_step=0.1)
+    errors = {}
+    for order in (1, 2):
+        simulation, _, _, error = exact_heat(
+            toy,
+            square,
+            sides,
+            lambda disc, model, bcs, clock, order=order: AdaptiveSimulation(
+                disc, model, rules, clock, scheme=BDF(order), bcs=bcs
+            ),
+        )
+        simulation.run(t_end=1.0)
+        errors[order] = error()
+    assert errors[2] < 0.1 * errors[1], errors
 
 
 def test_steps_that_keep_failing_raise(toy, square, sides):

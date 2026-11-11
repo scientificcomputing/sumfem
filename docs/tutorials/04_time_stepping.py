@@ -180,30 +180,65 @@ rates = np.log2(errors[:-1] / errors[1:])
 print(f"Crank-Nicolson: errors {errors}, rates {rates.round(2)}")
 assert np.all(rates > 2 - 0.15)
 
+# ## Runs in parts
+#
+# A simulation may run in parts, e.g. to change a load or the step between
+# them. The first run starts the history from the current values, and later
+# runs continue it, so BDF2 keeps its second order. Its weights follow the
+# sizes of the latest steps, so the step may change between the runs: here
+# it is halved halfway, and the errors still fall at second order.
+# {py:meth}`restart <sumfem.solvers.Simulation.restart>` starts afresh
+# instead, e.g. from new initial values:
+
+
+# +
+def run_in_parts(dt: float) -> tuple[float, int]:
+    disc = discrete.discretize([model, clock], discrete.DomainMaps({domain: marked}))
+    disc.set({clock.dt: dt})
+    simulation = solvers.Simulation(
+        disc, model, bcs, clock=clock, scheme=solvers.BDF(2)
+    )
+    disc.set({u: spatial})
+    simulation.run(t_end=0.5)
+    disc.set({clock.dt: dt / 2})
+    simulation.run(t_end=1.0)
+    e = error(disc[u], lambda x: (1 + x[0] ** 2 + 2 * x[1] ** 2) * (1 + np.sin(1.0)))
+    return e, simulation.steps_taken
+
+
+results = [run_in_parts(dt) for dt in (0.1, 0.05, 0.025)]
+errors = np.array([e for e, _ in results])
+rates = np.log2(errors[:-1] / errors[1:])
+print(f"BDF2 in two parts: steps {[n for _, n in results]}, rates {rates.round(2)}")
+assert np.all(rates > 2 - 0.15)
+# -
+
 # ## Output and metadata
 #
 # With an {py:class}`Output <sumfem.solvers.Output>`, a simulation writes its
 # fields with ADIOS2 and a `metadata.json` that records the versions, the
 # parameters with their units, the model, the time stepping and the meshes.
-# A callback is called after every step, e.g. to post-process. The output
-# goes to a temporary directory here, removed at the end:
+# The output stays open across the runs of a simulation, until it is closed
+# with {py:meth}`close <sumfem.solvers.Simulation.close>` or at the end of a
+# `with` block. A callback is called after every step, e.g. to post-process.
+# The output goes to a temporary directory here, removed at the end:
 
 with tempfile.TemporaryDirectory() as temporary:
     directory = pathlib.Path(MPI.COMM_WORLD.bcast(temporary, root=0))
     disc = discrete.discretize([model], discrete.DomainMaps({domain: marked}))
-    simulation = solvers.Simulation(
+    with solvers.Simulation(
         disc,
         model,
         bcs,
         clock=clock,
         scheme=solvers.BDF(2),
         output=solvers.Output(directory, every=5),
-    )
-    disc.set({u: spatial})
-    simulation.run(
-        t_end=1.0,
-        callback=lambda t, step: step % 5 or print(f"t = {t:.1f}, step {step}"),
-    )
+    ) as simulation:
+        disc.set({u: spatial})
+        simulation.run(
+            t_end=1.0,
+            callback=lambda t, step: step % 5 or print(f"t = {t:.1f}, step {step}"),
+        )
     MPI.COMM_WORLD.barrier()
     files = sorted(p.name for p in directory.iterdir())
     metadata = json.loads((directory / "metadata.json").read_text())
@@ -219,16 +254,17 @@ with tempfile.TemporaryDirectory() as temporary:
 # grows the step while Newton's method converges easily and cuts it when it
 # struggles, retrying failed steps, by the rules of an
 # {py:class}`AdaptiveTimeStep <sumfem.solvers.AdaptiveTimeStep>`. Steps end
-# at milestones, e.g. output times, and at the end time. This problem is
-# linear, so every step takes one iteration, and the steps grow up to the
-# largest one allowed:
+# at milestones, e.g. output times, and at the end time. BDF2 adapts its
+# weights to the changing steps, as above. This problem is linear, so every
+# step takes one iteration, and the steps grow up to the largest one
+# allowed:
 
 disc = discrete.discretize([model], discrete.DomainMaps({domain: marked}))
 rules = solvers.AdaptiveTimeStep(
     initial=0.01, growth_factor=1.5, target_iterations=4, max_step=0.2, milestones=[0.5]
 )
 adaptive = solvers.AdaptiveSimulation(
-    disc, model, rules, clock=clock, scheme=solvers.BDF(1), bcs=bcs
+    disc, model, rules, clock=clock, scheme=solvers.BDF(2), bcs=bcs
 )
 disc.set({u: spatial})
 times: list[float] = []
