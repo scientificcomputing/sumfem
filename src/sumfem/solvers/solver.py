@@ -258,7 +258,9 @@ class Solver:
     For factorized equations, Newton iterates on the unknowns divided by their
     scales, in SI, and the rows of the Dirichlet conditions are divided by the
     scale of their unknown, so that the whole system is dimensionless: the
-    residual, the step and every entry of the Jacobian are of size one. The
+    residual, the step and every entry of the Jacobian are of size one. This
+    is a two-sided diagonal scaling of the Jacobian, a form of equilibration
+    (`Habera and Zilian, 2026 <https://arxiv.org/abs/2601.06535>`_, Section 4.1). The
     Newton update is the same; the norms that stop Newton are not, nor are the
     pivots of an LU factorization. The functions of the unknowns hold SI values
     before and after a solve, which must go through :meth:`solve`, not the

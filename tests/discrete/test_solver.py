@@ -14,7 +14,8 @@ import sympy.physics.units as syu
 import ufl
 
 from sumfem.discrete import DomainMaps, MeshData, discretize
-from sumfem.models import Diffusion, Reaction, arrhenius
+from sumfem.models import Diffusion, Reaction, Source, arrhenius
+from sumfem.post_processing import error
 from sumfem.solvers import Solver
 from sumfem.symbolic import (
     DirichletBC,
@@ -98,7 +99,7 @@ def wall_problem(factorize: bool, kind: str | None, petsc_options: dict):
         },
     )
     wall = Domain.from_mesh("wall", mesh, length_scale=thickness)
-    T = Field("T", wall, ("Lagrange", 2), unit=K, scale=1000.0)
+    T = Field("T", wall, ("Lagrange", 2), unit=K, scale=1e3)
     c = Field("c", wall, ("Lagrange", 2), unit=1 / m**3, scale=1e22)
     kappa = Parameter("kappa", wall, default=400.0, unit=W / (m * K))
     sigma = Parameter("sigma", wall, default=1e-4, unit=W / (m**3 * K**4))
@@ -168,3 +169,42 @@ def test_newton_iterates_on_scaled_unknowns(kind, options):
     assert solver.converged_to_tolerance
     assert np.max(np.abs(T_h - T_ref)) < 1e-8 * 1000.0
     assert np.max(np.abs(c_h - c_ref)) < 1e-8 * 1e22
+
+
+def test_a_nanometre_domain_converges_when_scaled():
+    """Nonlinear diffusion on a cube of a nanometre, from zero.
+
+    In SI the rows of the diffusion are of some 1e-9 and those of the
+    Dirichlet conditions of one volt, so the relative test, against a first
+    residual of the Dirichlet rows, stops Newton far from the solution:
+    unscaled, 6 % off. Scaled, every row is of size one, but only with the
+    length scale of the domain: with the default of one metre, the size of
+    the equation, which goes as the length in 3D, was 1e9 too large, its
+    rows stayed of some 1e-9, and the solution was 49 % off.
+    """
+    L = 1e-9
+    mesh = dolfinx.mesh.create_unit_cube(MPI.COMM_WORLD, 4, 4, 4)
+    mesh.geometry.x[:] *= L
+    marked = MeshData.from_locators(
+        mesh, {2: {"Boundary": lambda x: np.full(x.shape[1], True)}}, boundary=True
+    )
+    cube = Domain.from_mesh("cube", mesh, length_scale=L)
+    u = Field("u", cube, ("Lagrange", 2), unit=syu.volt, scale=1.0)
+    k = Parameter("k", cube, default=1.0, unit=syu.farad / syu.meter)
+    length = Parameter("L", cube, default=L, unit=syu.meter)
+    volt = Parameter("V", cube, default=1.0, unit=syu.volt)
+    x = ufl.SpatialCoordinate(cube)
+    # u = V (x^2 + 2 y^2) / L^2, written with parameters to keep its units
+    u_exact = volt * ((x[0] / length) ** 2 + 2 * (x[1] / length) ** 2)
+    source = -ufl.div(k * (1 + (u_exact / volt) ** 2) * ufl.grad(u_exact))
+    model = Diffusion("d", u, k * (1 + (u / volt) ** 2)) + Source("s", u, source)
+
+    def exact(x):
+        return (x[0] / L) ** 2 + 2 * (x[1] / L) ** 2
+
+    system = build_system(model, check_units=True, factorize_equations=True)
+    disc = discretize([system], DomainMaps({cube: marked}))
+    solver = Solver(disc[system], [DirichletBC(u, "Boundary", exact)])
+    solver.solve()
+    assert solver.converged_to_tolerance
+    assert error(disc[u], exact, relative=True) < 1e-8

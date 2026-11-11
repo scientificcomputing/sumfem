@@ -72,7 +72,9 @@ def arrhenius(
 
     The `Arrhenius equation <https://en.wikipedia.org/wiki/Arrhenius_equation>`_
     gives the dependence of a rate constant on the temperature, through the
-    activation energy of the reaction.
+    activation energy of the reaction (`Arrhenius, 1889
+    <https://doi.org/10.1515/zpch-1889-0416>`_; on its origin and status,
+    `Logan, 1982 <https://doi.org/10.1021/ed059p279>`_).
 
     Args:
         prefactor: ``k_0``.
