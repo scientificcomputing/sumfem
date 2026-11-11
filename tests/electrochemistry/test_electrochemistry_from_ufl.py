@@ -303,7 +303,8 @@ def test_positive_couple_with_protons_water_and_piston_velocities(cell, box, com
         specific_area=1e3,
         rate_constant=1e-6,
         formal_potential=1.0,
-        stoichiometry={"H": 2, "H2O": -1},
+        reactants={"VO": 1, "H2O": 1},
+        products={"VO2": 1, "H": 2},
     )
 
     class Mass(Residual):
@@ -334,7 +335,7 @@ def test_positive_couple_with_protons_water_and_piston_velocities(cell, box, com
     )
 
 
-def test_the_stoichiometry_needs_ions_with_fields():
+def test_the_reaction_needs_its_couple_and_ions_with_fields():
     domain = Domain(DOMAIN, "interval")
     potentials = [Field(name, domain, ("Lagrange", 1)) for name in ("phi_s", "phi_l")]
     c = [Field(name, domain, ("Lagrange", 1)) for name in ("c4", "c5")]
@@ -346,8 +347,15 @@ def test_the_stoichiometry_needs_ions_with_fields():
     electrolyte = Electrolyte("e", domain, ions)
     with pytest.raises(ValueError, match="electroneutrality"):
         ButlerVolmer(
-            "bv", *potentials, electrolyte, "VO", "VO2", stoichiometry={"H": 2}
+            "bv",
+            *potentials,
+            electrolyte,
+            "VO",
+            "VO2",
+            products={"VO2": 1, "H": 2},
         )
+    with pytest.raises(ValueError, match="must hold the reduced ion"):
+        ButlerVolmer("bv", *potentials, electrolyte, "VO", "VO2", reactants={"H": 1})
 
 
 def test_mass_transfer_takes_the_properties_of_the_electrolyte():

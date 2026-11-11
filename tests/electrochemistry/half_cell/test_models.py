@@ -1,5 +1,7 @@
 """The RFBniCS models: units, structure, schedules and post-processing."""
 
+import dataclasses
+
 from mpi4py import MPI
 
 import dolfinx.fem
@@ -9,7 +11,13 @@ import pytest
 import sympy.physics.units as syu
 
 from sumfem.discrete import DomainMaps, discretize
-from sumfem.electrochemistry import RedoxHalfCell
+from sumfem.electrochemistry import (
+    Ion,
+    PistonVelocityButlerVolmer,
+    PorousElectrode,
+    RedoxCouple,
+    RedoxHalfCell,
+)
 from sumfem.models import (
     BoundaryFlux,
     BrinkmanForchheimer,
@@ -108,8 +116,9 @@ def test_half_cells_have_consistent_units(reference):
     )
     assert_consistent(cell.model)
     names = [m.name for m in cell.model.components]
-    assert "transport_V2_channels" in names and "storage_H_channels" in names
-    assert "electrolyte_channels" in names
+    assert "cell_transport_V2_channels" in names
+    assert "cell_storage_H_channels" in names
+    assert "cell_electrolyte_channels" in names
 
 
 def test_shared_parameters_are_used_by_flow_and_kinetics(reference):
@@ -148,17 +157,8 @@ def test_the_couple_is_oxidized_or_reduced_on_discharge(reference):
     residuals = []
     for oxidation in (True, False):
         domain = Domain.from_mesh("cell", marked.mesh)
-        cell = RedoxHalfCell(
-            domain,
-            reference.IONS,
-            reference.RESERVOIR,
-            "V2",
-            "V3",
-            reference.electrode(domain),
-            oxidation_on_discharge=oxidation,
-            rate_constant=0.0,
-            formal_potential=0.0,
-        )
+        couple = RedoxCouple("V2", "V3", 0.0, 0.0, oxidation_on_discharge=oxidation)
+        cell = reference.half_cell(domain, couple=couple)
         scheme = BDF(1)
         system = build_system(
             cell.model, substitutions=scheme.substitutions(cell.model)
@@ -198,12 +198,8 @@ def test_the_reservoir_names_ions_of_the_electrolyte(reference):
             domain,
             reference.IONS,
             {**reference.RESERVOIR, "Cl": 1.0},
-            "V2",
-            "V3",
+            reference.COUPLE,
             reference.electrode(domain),
-            oxidation_on_discharge=True,
-            rate_constant=2.5e-7,
-            formal_potential=-0.36,
         )
 
 
@@ -221,21 +217,23 @@ def test_post_processing(reference):
 
 
 def test_the_couple_conserves_charge(reference):
-    """V3 + 2 e- <-> V2 does not conserve charge, nor V3 + e- <-> SO4."""
+    """V2 <-> V3 + 2 e- does not conserve charge. SO4 <-> HSO4 + e- does, but
+    sulfate follows from electroneutrality, so it has no field to react."""
     domain = Domain("cell", "interval")
     with pytest.raises(ValueError, match="does not conserve charge"):
-        reference.half_cell(domain, electrons=2)
+        reference.half_cell(
+            domain, couple=dataclasses.replace(reference.COUPLE, electrons=2)
+        )
     with pytest.raises(ValueError, match="needs a reservoir"):
-        RedoxHalfCell(
+        reference.half_cell(
             domain,
-            reference.IONS,
-            reference.RESERVOIR,
-            "SO4",
-            "V3",
-            reference.electrode(domain),
-            oxidation_on_discharge=True,
-            rate_constant=2.5e-7,
-            formal_potential=-0.36,
+            couple=dataclasses.replace(
+                reference.COUPLE,
+                reduced="SO4",
+                oxidized="HSO4",
+                reactants=None,
+                products=None,
+            ),
         )
 
 
@@ -250,10 +248,156 @@ def test_the_reservoir_lacks_exactly_one_ion(reference, missing):
             domain,
             reference.IONS,
             reservoir,
-            "V2",
-            "V3",
+            reference.COUPLE,
             reference.electrode(domain),
-            oxidation_on_discharge=True,
-            rate_constant=2.5e-7,
-            formal_potential=-0.36,
         )
+
+
+CONCENTRATION_UNIT = syu.mol / syu.m**3
+DIFFUSIVITY_UNIT = syu.m**2 / syu.second
+
+POSITIVE_IONS = (
+    Ion("VO", 2, 3.9e-10 * DIFFUSIVITY_UNIT, positive=True),
+    Ion("VO2", 1, 3.9e-10 * DIFFUSIVITY_UNIT, positive=True),
+    Ion("H", 1, 9.312e-9 * DIFFUSIVITY_UNIT),
+    Ion("HSO4", -1, 1.33e-9 * DIFFUSIVITY_UNIT),
+    Ion("H2O", 0, 2.3e-9 * DIFFUSIVITY_UNIT),
+    Ion("SO4", -2, 1.065e-9 * DIFFUSIVITY_UNIT),
+)
+"""The positive electrolyte of Shah et al. (2008): VO2+, VO2+, protons,
+bisulfate and water, sulfate by electroneutrality."""
+
+POSITIVE_RESERVOIR = {
+    "VO": 1053.0 * CONCENTRATION_UNIT,
+    "VO2": 27.0 * CONCENTRATION_UNIT,
+    "H": 1200.0 * CONCENTRATION_UNIT,
+    "HSO4": 1200.0 * CONCENTRATION_UNIT,
+    "H2O": 4.2e4 * CONCENTRATION_UNIT,
+}
+
+
+POSITIVE_COUPLE = RedoxCouple(
+    reduced="VO",
+    oxidized="VO2",
+    rate_constant=0.68 * 3e-9 * syu.m / syu.second,
+    formal_potential=1.004 * syu.volt,
+    oxidation_on_discharge=False,
+    reactants={"VO": 1, "H2O": 1},
+    products={"VO2": 1, "H": 2},
+)
+"""VO2+ + H2O <-> VO2+ + 2 H+ + e- of Shah et al., reduced on discharge."""
+
+
+def positive_half_cell(domain, electrode, couple=POSITIVE_COUPLE, **kwargs):
+    """The positive half-cell of Shah et al."""
+    return RedoxHalfCell(
+        domain, POSITIVE_IONS, POSITIVE_RESERVOIR, couple, electrode, **kwargs
+    )
+
+
+def test_a_positive_half_cell_produces_protons_and_consumes_water(reference):
+    """VO2+ + H2O <-> VO2+ + 2 H+ + e- conserves charge only with its protons,
+    and diffusion between the fibres limits it without flow."""
+    domain = Domain("cell", "interval")
+    electrode = reference.electrode(domain)
+    cell = positive_half_cell(domain, electrode, fiber_distance=10 * syu.micrometer)
+    assert isinstance(cell.reaction, PistonVelocityButlerVolmer)
+    assert_consistent(cell.model)
+    with pytest.raises(ValueError, match="does not conserve charge"):
+        positive_half_cell(
+            domain,
+            electrode,
+            dataclasses.replace(POSITIVE_COUPLE, reactants=None, products=None),
+        )
+    with pytest.raises(ValueError, match="has no ions"):
+        # An electrolyte without water
+        RedoxHalfCell(
+            domain,
+            tuple(ion for ion in POSITIVE_IONS if ion.name != "H2O"),
+            {k: v for k, v in POSITIVE_RESERVOIR.items() if k != "H2O"},
+            POSITIVE_COUPLE,
+            electrode,
+        )
+
+
+def test_existing_fields_are_used_as_given(reference):
+    domain = Domain("cell", "interval")
+    phi_s = Field("psi", domain, ("Lagrange", 1), unit=syu.volt)
+    phi_l = Field("phi", domain, ("Lagrange", 1), unit=syu.volt)
+    protons = Field("c_protons", domain, ("Lagrange", 1), unit=CONCENTRATION_UNIT)
+    cell = reference.half_cell(domain, phi_s=phi_s, phi_l=phi_l, fields={"H": protons})
+    assert cell.phi_s is phi_s and cell.phi_l is phi_l
+    assert cell.concentrations["H"] is protons
+    assert cell.electrolyte["H"].field is protons
+    assert cell.concentrations["V2"].name == "c_V2"
+
+
+def test_a_resolved_collector_and_membrane_carry_no_currents(reference):
+    """In a full cell the collector and the membrane are domains of their
+    own, so the half-cell puts no currents on its boundary."""
+    domain = Domain("cell", "interval")
+    cell = reference.half_cell(domain, collector=None, membrane=None)
+    names = [m.name for m in cell.model.components]
+    assert not any("current" in name for name in names)
+    with pytest.raises(ValueError, match="resolves them"):
+        cell.voltage(None)
+    with pytest.raises(ValueError, match="needs its markers"):
+        reference.half_cell(domain, membrane=None, proton_flux=True)
+
+
+def test_two_half_cells_share_the_electrolyte_potential_and_water(reference):
+    """A negative and a positive half-cell side by side, with one electrolyte
+    potential and one water field, as in a full cell: their parameters and
+    models have names of their own, and their sum has consistent units."""
+    domain = Domain("cell", "interval")
+    phi_l = Field("phi_l", domain, ("Lagrange", 1), unit=syu.volt)
+    water = Field("c_H2O", domain, ("Lagrange", 1), unit=CONCENTRATION_UNIT)
+    sides = {}
+    for side in ("negative", "positive"):
+        fields = {
+            ion: Field(
+                f"{side}_c_{ion}", domain, ("Lagrange", 1), unit=CONCENTRATION_UNIT
+            )
+            for ion in ("H", "HSO4")
+        }
+        common = dict(
+            phi_s=Field(f"{side}_phi_s", domain, ("Lagrange", 1), unit=syu.volt),
+            phi_l=phi_l,
+            collector=None,
+            membrane=None,
+            fiber_distance=10 * syu.micrometer,
+            name=side,
+            electrolyte_name=f"{side}_electrolyte",
+        )
+        electrode = PorousElectrode(
+            f"{side}_electrode",
+            domain,
+            (side.capitalize(),),
+            porosity=0.68,
+            conductivity=500.0,
+            specific_area=2e6,
+        )
+        if side == "negative":
+            ions = (*reference.IONS[:4], Ion("H2O", 0, 2.3e-9), reference.IONS[4])
+            reservoir = {**reference.RESERVOIR, "H2O": 4.2e4}
+            couple = RedoxCouple("V2", "V3", 0.68 * 1.75e-7, -0.255, True)
+            sides[side] = RedoxHalfCell(
+                domain,
+                ions,
+                reservoir,
+                couple,
+                electrode,
+                fields={**fields, "H2O": water},
+                **common,
+            )
+        else:
+            sides[side] = positive_half_cell(
+                domain, electrode, fields={**fields, "H2O": water}, **common
+            )
+    model = sides["negative"].model + sides["positive"].model
+    system = build_system(model, check_units=True)
+    names = [f.name for f in system.unknowns]
+    assert names.count("phi_l") == 1 and names.count("c_H2O") == 1
+    assert {"negative_c_H", "positive_c_H", "c_VO", "c_V2"} <= set(names)
+    assert "negative.rate_constant" in system.parameters
+    assert "positive_electrolyte.D_H" in system.parameters

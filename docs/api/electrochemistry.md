@@ -56,6 +56,9 @@
 ## Half-cells
 
 ```{eval-rst}
+.. autoclass:: RedoxCouple
+   :members:
+
 .. autoclass:: RedoxHalfCell
    :members:
 ```

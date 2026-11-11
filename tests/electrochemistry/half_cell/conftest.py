@@ -23,7 +23,7 @@ import sympy.physics.units as syu
 import ufl
 
 from sumfem.discrete import MeshData
-from sumfem.electrochemistry import Ion, PorousElectrode, RedoxHalfCell
+from sumfem.electrochemistry import Ion, PorousElectrode, RedoxCouple, RedoxHalfCell
 from sumfem.symbolic import Domain
 
 W = 2.5e-3
@@ -398,18 +398,24 @@ def electrode(domain: Domain, markers: tuple[str, ...] = ()) -> PorousElectrode:
     )
 
 
-def half_cell(domain: Domain, porous=None, **kwargs) -> RedoxHalfCell:
-    """The negative half-cell of the examples, V2+ oxidized on discharge."""
+COUPLE = RedoxCouple(
+    reduced="V2",
+    oxidized="V3",
+    rate_constant=2.5e-7 * syu.m / syu.second,
+    formal_potential=-0.36 * syu.volt,
+    oxidation_on_discharge=True,
+)
+"""V2+ <-> V3+ + e- of the examples, oxidized on discharge."""
+
+
+def half_cell(domain: Domain, porous=None, couple=None, **kwargs) -> RedoxHalfCell:
+    """The negative half-cell of the examples, by default with their couple."""
     return RedoxHalfCell(
         domain,
         IONS,
         RESERVOIR,
-        "V2",
-        "V3",
+        COUPLE if couple is None else couple,
         electrode(domain) if porous is None else porous,
-        oxidation_on_discharge=True,
-        rate_constant=2.5e-7 * syu.m / syu.second,
-        formal_potential=-0.36 * syu.volt,
         **kwargs,
     )
 
@@ -427,6 +433,7 @@ def reference():
         measures=measures,
         IONS=IONS,
         RESERVOIR=RESERVOIR,
+        COUPLE=COUPLE,
         electrode=electrode,
         half_cell=half_cell,
         electrochemistry=electrochemistry,

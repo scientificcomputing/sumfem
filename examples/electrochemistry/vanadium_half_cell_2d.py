@@ -87,7 +87,7 @@ import sympy.physics.units as syu
 import ufl
 
 from sumfem import discrete, solvers, symbolic
-from sumfem.electrochemistry import Ion, PorousElectrode, RedoxHalfCell
+from sumfem.electrochemistry import Ion, PorousElectrode, RedoxCouple, RedoxHalfCell
 from sumfem.models import BoundaryFlux, Darcy
 from sumfem.plotting import gather_grid
 
@@ -226,23 +226,26 @@ reservoir = {
 }
 # -
 
-# The half-cell is the negative one of {doc}`vanadium_half_cell_1d`. The
-# superficial velocity of the flow carries the ions and drives the mass
+# The half-cell is the negative one of {doc}`vanadium_half_cell_1d`, with its
+# couple. The superficial velocity of the flow carries the ions and drives the mass
 # transfer to the fibres, which a velocity switches on. The flow carries the
 # ions out at the `outlet`, the membrane passes the current as protons with
 # `proton_flux`, and the reservoir concentrations hold at the inlet:
 
+# +
+couple = RedoxCouple(
+    reduced="V2",
+    oxidized="V3",
+    rate_constant=2.5e-7 * syu.m / syu.second,
+    formal_potential=-0.36 * syu.volt,
+    oxidation_on_discharge=True,
+)
 cell = RedoxHalfCell(
     domain,
     ions,
     reservoir,
-    reduced="V2",
-    oxidized="V3",
-    electrons=1,
-    electrode=electrode,
-    oxidation_on_discharge=True,
-    rate_constant=2.5e-7 * syu.m / syu.second,
-    formal_potential=-0.36 * syu.volt,
+    couple,
+    electrode,
     velocity=darcy.superficial_velocity,
     outlet=("Outlet",),
     proton_flux=True,
@@ -250,6 +253,7 @@ cell = RedoxHalfCell(
     viscosity=viscosity,
 )
 inlet = cell.inlet_conditions("Inlet")
+# -
 
 # The flow and the half-cell are discretized together, so they share their
 # parameters, with the quadrature degree of the nonlinear kinetics bounded as

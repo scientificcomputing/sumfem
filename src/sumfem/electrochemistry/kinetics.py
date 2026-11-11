@@ -13,8 +13,8 @@ import numpy.typing as npt
 import sympy.physics.units as syu
 import ufl
 
-from sumfem.models import butler_volmer
-from sumfem.symbolic import Field, Residual, as_expr
+from sumfem.models import RateReaction, butler_volmer
+from sumfem.symbolic import Field, as_expr
 
 from .electrolyte import Electrolyte, Ion
 
@@ -30,32 +30,36 @@ INPUT = ufl.core.expr.Expr | npt.ArrayLike | None
 """A model input: an expression, a value, or ``None`` for a parameter."""
 
 
-class ElectrodeReaction(Residual):
-    """The reaction ``reduced -> oxidized + n e-`` in a porous electrode.
+class ElectrodeReaction(RateReaction):
+    """An electrode reaction ``reactants -> products + n e-`` in a porous electrode.
 
-    The volumetric current ``f = a i``, with the specific area ``a`` and the
-    interfacial current density ``i`` of :meth:`current_density`, leaves the
-    solid and enters the electrolyte. It consumes the reduced species and
-    produces the oxidized one at the rate ``f / (n F)``, and every other
-    species of the reaction, e.g. protons or water, ``nu`` times as much.
-    Species without a field get no source. Subclasses give the kinetics.
+    A :class:`~sumfem.models.RateReaction` that also moves charge between
+    the phases. The volumetric current ``f = a i``, with the specific area
+    ``a`` and the interfacial current density ``i`` of
+    :meth:`current_density`, leaves the solid and enters the electrolyte.
+    The reaction happens ``f / (n F)`` times per unit volume and time, so it
+    consumes each reactant and produces each product at that rate times its
+    coefficient, e.g. ``V2+ -> V3+ + e-``, or ``VO2+ + H2O -> VO2+ + 2 H+ +
+    e-``, which also produces two protons and consumes one water molecule.
+    Participants without a field get no source. Subclasses give the
+    kinetics.
 
     Args:
         name: Name of the model.
         solid_potential: The potential of the solid, ``phi_s``.
         electrolyte_potential: The potential of the electrolyte, ``phi_l``.
         electrolyte: The electrolyte, for the constants and temperature.
-        reduced: Concentration of the reduced species, if any.
-        oxidized: Concentration of the oxidized species, if any.
+        reactants: The coefficient of each species that oxidation consumes,
+            by concentration. None for a reaction that only moves charge.
+        products: The coefficient of each species that oxidation produces.
         specific_area: Specific area ``a``. Defaults to the parameter
             ``"<name>.specific_area"`` in 1/m.
         electrons: Number of electrons ``n`` transferred.
         markers: Cell markers of the electrode. Empty for the whole domain.
-        others: Other species of the reaction: concentrations with the moles
-            ``nu`` of each produced per mole oxidized, negative for one
-            consumed. E.g. VO2+ + H2O -> VO2+ + 2 H+ + e- produces two protons
-            and consumes one water.
     """
+
+    _derives_rate = True
+    _requires_species = False
 
     _solid_potential: Field
     """The potential of the solid."""
@@ -66,24 +70,11 @@ class ElectrodeReaction(Residual):
     _electrolyte: Electrolyte
     """The electrolyte."""
 
-    _reduced_concentration: ufl.core.expr.Expr | None
-    """Concentration of the reduced species, if any."""
-
-    _oxidized_concentration: ufl.core.expr.Expr | None
-    """Concentration of the oxidized species, if any."""
-
     _specific_area: ufl.core.expr.Expr
     """Specific area of the electrode."""
 
     _electrons: int
     """Number of electrons transferred."""
-
-    _markers: tuple[str, ...]
-    """Cell markers of the electrode."""
-
-    _others: tuple[tuple[ufl.core.expr.Expr, float], ...]
-    """Other species of the reaction, with the moles produced per mole
-    oxidized."""
 
     def __init__(
         self,
@@ -91,19 +82,22 @@ class ElectrodeReaction(Residual):
         solid_potential: Field,
         electrolyte_potential: Field,
         electrolyte: Electrolyte,
-        reduced: ufl.core.expr.Expr | None = None,
-        oxidized: ufl.core.expr.Expr | None = None,
+        reactants: typing.Mapping[ufl.core.expr.Expr, int] | None = None,
+        products: typing.Mapping[ufl.core.expr.Expr, int] | None = None,
         specific_area: INPUT = None,
         electrons: int = 1,
         markers: tuple[str, ...] = (),
-        others: typing.Sequence[tuple[ufl.core.expr.Expr, float]] = (),
     ):
-        super().__init__(name)
+        # The reaction happens in the electrode, where the solid is
+        super().__init__(
+            name,
+            dict(reactants or {}),
+            dict(products or {}),
+            measure=solid_potential.domain.dx(*markers),
+        )
         self._solid_potential = solid_potential
         self._electrolyte_potential = electrolyte_potential
         self._electrolyte = electrolyte
-        self._reduced_concentration = reduced
-        self._oxidized_concentration = oxidized
         self._specific_area = self.input(
             "specific_area",
             specific_area,
@@ -112,8 +106,6 @@ class ElectrodeReaction(Residual):
             doc="Specific area of the electrode",
         )
         self._electrons = electrons
-        self._markers = tuple(markers)
-        self._others = tuple((c, float(nu)) for c, nu in others)
 
     @property
     def electrolyte(self) -> Electrolyte:
@@ -135,21 +127,19 @@ class ElectrodeReaction(Residual):
         """The volumetric current ``f = a i``."""
         return self._specific_area * self.current_density()
 
+    def rate(self) -> ufl.core.expr.Expr:
+        """The rate ``f / (n F)`` of the reaction, per unit volume."""
+        return self.source() / (self._electrons * self._electrolyte.F)
+
     def residual(self) -> ufl.Form:
         f = self.source()
-        dx = self._solid_potential.domain.dx(*self._markers)
-        F = f * self._solid_potential.v * dx - f * self._electrolyte_potential.v * dx
-        rate = f / (self._electrons * self._electrolyte.F)
-        # The residual of a species gains what the reaction consumes
-        species = (
-            (self._reduced_concentration, 1.0),
-            (self._oxidized_concentration, -1.0),
-            *((c, -nu) for c, nu in self._others),
+        dx = self._measure
+        current = (
+            f * self._solid_potential.v * dx - f * self._electrolyte_potential.v * dx
         )
-        for c, consumed in species:
-            if isinstance(c, Field):
-                F += consumed * rate * c.v * dx
-        return F
+        if not self._fields():
+            return current
+        return current + super().residual()
 
 
 class ExchangeCurrentButlerVolmer(ElectrodeReaction):
@@ -214,8 +204,8 @@ class ExchangeCurrentButlerVolmer(ElectrodeReaction):
             solid_potential,
             electrolyte_potential,
             electrolyte,
-            reduced=reduced,
-            oxidized=oxidized,
+            reactants=None if reduced is None else {reduced: 1},
+            products=None if oxidized is None else {oxidized: 1},
             specific_area=specific_area,
             electrons=electrons,
             markers=markers,
@@ -306,13 +296,17 @@ class ButlerVolmer(ElectrodeReaction):
             Defaults to the parameter ``"<name>.cathodic_transfer"``, 0.5.
         electrons: See :class:`ElectrodeReaction`.
         markers: See :class:`ElectrodeReaction`.
-        stoichiometry: Other ions of the reaction, by name, with the moles
-            produced per mole of the reduced ion oxidized, see ``others`` of
-            :class:`ElectrodeReaction`.
+        reactants: The coefficient of each ion that oxidation consumes, by
+            name, see :class:`ElectrodeReaction`. Defaults to the reduced
+            ion alone, e.g. ``{"VO": 1, "H2O": 1}`` for VO2+ + H2O ->
+            VO2+ + 2 H+ + e-.
+        products: The coefficient of each ion that oxidation produces.
+            Defaults to the oxidized ion alone, e.g. ``{"VO2": 1, "H": 2}``.
 
     Raises:
-        ValueError: If an ion of the stoichiometry has no field, as the ion
-            that follows from electroneutrality.
+        ValueError: If the reactants lack the reduced ion or the products the
+            oxidized one, or if an ion of the reaction other than the couple
+            has no field, as the ion that follows from electroneutrality.
     """
 
     _reduced: Ion
@@ -348,26 +342,40 @@ class ButlerVolmer(ElectrodeReaction):
         cathodic_transfer: INPUT = None,
         electrons: int = 1,
         markers: tuple[str, ...] = (),
-        stoichiometry: typing.Mapping[str, float] | None = None,
+        reactants: typing.Mapping[str, int] | None = None,
+        products: typing.Mapping[str, int] | None = None,
     ):
-        stoichiometry = dict(stoichiometry or {})
-        for ion in stoichiometry:
+        reactants = dict(reactants or {reduced: 1})
+        products = dict(products or {oxidized: 1})
+        if reduced not in reactants or oxidized not in products:
+            raise ValueError(
+                f"The reactants {reactants} must hold the reduced ion {reduced!r}, "
+                f"and the products {products} the oxidized ion {oxidized!r}."
+            )
+        others = (set(reactants) | set(products)) - {reduced, oxidized}
+        for ion in sorted(others):
             if electrolyte[ion].concentration is None:
                 raise ValueError(
                     f"Ion {ion!r} of the reaction follows from electroneutrality, "
                     "so it has no field to produce or consume."
                 )
+
+        def concentrations(ions: dict[str, int]) -> dict[ufl.core.expr.Expr, int]:
+            return {
+                electrolyte.concentration(ion, positive=False): nu
+                for ion, nu in ions.items()
+            }
+
         super().__init__(
             name,
             solid_potential,
             electrolyte_potential,
             electrolyte,
-            reduced=electrolyte.concentration(reduced, positive=False),
-            oxidized=electrolyte.concentration(oxidized, positive=False),
+            reactants=concentrations(reactants),
+            products=concentrations(products),
             specific_area=specific_area,
             electrons=electrons,
             markers=markers,
-            others=[(electrolyte[ion].field, nu) for ion, nu in stoichiometry.items()],
         )
         domain = solid_potential.domain
         self._reduced = electrolyte[reduced]
@@ -554,7 +562,8 @@ class MassTransferButlerVolmer(ButlerVolmer):
         cathodic_transfer: INPUT = None,
         electrons: int = 1,
         markers: tuple[str, ...] = (),
-        stoichiometry: typing.Mapping[str, float] | None = None,
+        reactants: typing.Mapping[str, int] | None = None,
+        products: typing.Mapping[str, int] | None = None,
     ):
         super().__init__(
             name,
@@ -570,7 +579,8 @@ class MassTransferButlerVolmer(ButlerVolmer):
             cathodic_transfer=cathodic_transfer,
             electrons=electrons,
             markers=markers,
-            stoichiometry=stoichiometry,
+            reactants=reactants,
+            products=products,
         )
         domain = solid_potential.domain
         self._velocity = as_expr(velocity)

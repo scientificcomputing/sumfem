@@ -82,7 +82,7 @@ import numpy as np
 import sympy.physics.units as syu
 
 from sumfem import discrete, solvers, symbolic
-from sumfem.electrochemistry import Ion, PorousElectrode, RedoxHalfCell
+from sumfem.electrochemistry import Ion, PorousElectrode, RedoxCouple, RedoxHalfCell
 
 # -
 
@@ -185,31 +185,30 @@ reservoir = {
 }
 # -
 
-# {py:class}`RedoxHalfCell <sumfem.electrochemistry.RedoxHalfCell>` sums the
-# models of {eq}`half-cell` for a redox couple. The reaction
-# $\mathrm{V^{2+} \rightleftharpoons V^{3+} + e^-}$ of {eq}`half-cell-kinetics`
-# is given by three arguments: the ion `reduced`, V²⁺, the ion `oxidized`,
-# V³⁺, and the number of `electrons` the reaction transfers, which the
-# charges of the ions must match. The kinetics take the standard rate
-# constant $k_0$ and the formal potential $E_0$ of the couple.
-# The other ions take no part in the reaction; they carry current and keep
-# the electrolyte neutral. Discharge oxidizes V²⁺ in this negative
+# A {py:class}`RedoxCouple <sumfem.electrochemistry.RedoxCouple>` gives the
+# reaction $\mathrm{V^{2+} \rightleftharpoons V^{3+} + e^-}$ of
+# {eq}`half-cell-kinetics`: the ion `reduced`, V²⁺, the ion `oxidized`, V³⁺,
+# and the number of `electrons` the reaction transfers, which the charges of
+# the ions must match, with the standard rate constant $k_0$ and the formal
+# potential $E_0$ of its kinetics. Discharge oxidizes V²⁺ in this negative
 # half-cell; the positive half-cell of the battery, with the couple
-# VO²⁺/VO₂⁺, reduces its couple on discharge, which reverses the current. The
-# concentrations of the reservoir are Dirichlet conditions at the membrane:
+# VO²⁺/VO₂⁺, reduces its couple on discharge, which reverses the current:
 
-cell = RedoxHalfCell(
-    domain,
-    ions,
-    reservoir,
+couple = RedoxCouple(
     reduced="V2",
     oxidized="V3",
     electrons=1,
-    electrode=electrode,
-    oxidation_on_discharge=True,
     rate_constant=2.5e-7 * syu.m / syu.second,
     formal_potential=-0.36 * syu.volt,
+    oxidation_on_discharge=True,
 )
+
+# {py:class}`RedoxHalfCell <sumfem.electrochemistry.RedoxHalfCell>` sums the
+# models of {eq}`half-cell` for the couple. The other ions take no part in
+# the reaction; they carry current and keep the electrolyte neutral. The
+# concentrations of the reservoir are Dirichlet conditions at the membrane:
+
+cell = RedoxHalfCell(domain, ions, reservoir, couple, electrode)
 inlet = cell.inlet_conditions("Membrane")
 
 # The discretization bounds the quadrature degree of the nonlinear kinetics,

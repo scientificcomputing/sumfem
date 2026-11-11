@@ -77,7 +77,7 @@ import sympy.physics.units as syu
 import ufl
 
 from sumfem import discrete, solvers, symbolic
-from sumfem.electrochemistry import Ion, PorousElectrode, RedoxHalfCell
+from sumfem.electrochemistry import Ion, PorousElectrode, RedoxCouple, RedoxHalfCell
 from sumfem.models import Brinkman, BrinkmanForchheimer, GradDiv, NavierStokes, Stokes
 from sumfem.plotting import gather_grid
 
@@ -334,17 +334,19 @@ reservoir = {
     "H": 1000.0 * concentration,
     "HSO4": 1000.0 * concentration,
 }
+couple = RedoxCouple(
+    reduced="V2",
+    oxidized="V3",
+    rate_constant=2.5e-7 * syu.m / syu.second,
+    formal_potential=-0.36 * syu.volt,
+    oxidation_on_discharge=True,
+)
 cell = RedoxHalfCell(
     domain,
     ions,
     reservoir,
-    reduced="V2",
-    oxidized="V3",
-    electrons=1,
-    electrode=electrode,
-    oxidation_on_discharge=True,
-    rate_constant=2.5e-7 * syu.m / syu.second,
-    formal_potential=-0.36 * syu.volt,
+    couple,
+    electrode,
     channels=channels,
     velocity=u,
     outlet=("Outlet",),
