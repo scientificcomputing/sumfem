@@ -24,6 +24,7 @@ parts:
   - caption: "Electrochemistry"
     chapters:
       - file: "examples/electrochemistry/porous_electrode.py"
+      - file: "examples/electrochemistry/vanadium_half_cell_1d.py"
   - caption: "Python API"
     chapters:
       - file: "docs/api/index"
