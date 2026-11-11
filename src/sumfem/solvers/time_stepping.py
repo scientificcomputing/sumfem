@@ -14,6 +14,7 @@ from __future__ import annotations
 import functools
 import math
 import typing
+from collections.abc import Sequence
 
 import sympy.physics.units as syu
 import ufl
@@ -37,12 +38,30 @@ __all__ = [
 ]
 
 
-# Weights of u_{n+1}, u_n, u_{n-1}, ... for each order, to be divided by dt
-_BDF_WEIGHTS: dict[int, tuple[float, ...]] = {
-    1: (1.0, -1.0),
-    2: (1.5, -2.0, 0.5),
-    3: (11 / 6, -3.0, 1.5, -1 / 3),
-}
+_BDF_ORDERS = (1, 2, 3)
+"""The orders of the BDF schemes."""
+
+
+def _bdf_weights(steps: Sequence[float]) -> tuple[float, ...]:
+    """Weights of ``u_{n+1}, u_n, u_{n-1}, ...`` in a BDF formula.
+
+    The derivative at the new time of the polynomial that interpolates the
+    values at the new time and at the previous ones, so the formula is exact
+    for polynomials in time of degree up to the number of steps.
+
+    Args:
+        steps: The sizes of the current step and of the previous ones, most
+            recent first; their number is the order.
+    """
+    # The times of the values, relative to the new time
+    times = [0.0, *(-sum(steps[: j + 1]) for j in range(len(steps)))]
+    weights = [sum(1.0 / (0.0 - tm) for tm in times[1:])]
+    for j, tj in enumerate(times[1:], start=1):
+        others = [tm for m, tm in enumerate(times) if m != j]
+        numerator = math.prod(0.0 - tm for tm in others[1:])
+        weights.append(numerator / math.prod(tj - tm for tm in others))
+    return tuple(weights)
+
 
 Substitutions = dict[ufl.Coefficient, ufl.core.expr.Expr]
 """Replacements of terminals in the forms of a system."""
@@ -76,13 +95,21 @@ class TimeScheme:
         """
         raise NotImplementedError
 
-    def set_step(self, step: int, dt: float, discretization: Discretization) -> None:
+    def set_step(
+        self,
+        step: int,
+        dt: float,
+        discretization: Discretization,
+        previous: Sequence[float] = (),
+    ) -> None:
         """Set the scheme's parameters for a time step.
 
         Args:
             step: Number of the step, starting at 1.
             dt: Time step size.
             discretization: The discretization holding the parameter values.
+            previous: Sizes of the steps before, most recent first. Missing
+                ones are taken equal to ``dt``.
         """
         raise NotImplementedError
 
@@ -101,17 +128,28 @@ class BDF(TimeScheme):
     ``w0 * field + w1 * field.previous(1) + ...``, and the time derivative
     ``Dt(q)`` of an expression by ``w0 * q + w1 * q(previous(1)) + ...``,
     the expression of the fields' previous values. The weights are
-    parameters, set at every step from the time step size. The first steps
-    of a higher order scheme use the highest order the available history
-    allows, so one compiled system serves every step.
+    parameters, set at every step from the sizes of the current and the
+    previous steps: they differentiate, at the new time, the polynomial
+    through the values at the times of the steps. The steps may thus change
+    in size, e.g. between the runs of a
+    :class:`~sumfem.solvers.simulation.Simulation` or in an
+    :class:`~sumfem.solvers.simulation.AdaptiveSimulation`; with equal steps
+    the weights are the classical ones. The first steps of a higher order
+    scheme use the highest order the available history allows, so one
+    compiled system serves every step.
 
-    BDF3 is not A-stable, so it suits damped problems better than waves.
+    A step that grows fast relative to the previous one can make the higher
+    orders unstable: BDF2 stays zero-stable while each step is less than
+    ``1 + sqrt(2)`` times the one before, and BDF3 needs smaller ratios.
+    Shrinking steps are safe. BDF3 is not A-stable, so it suits damped
+    problems better than waves.
 
     Without a given history, the first steps use lower orders. The first,
     backward Euler step then limits BDF3 to second order in general. To keep
     the full order, set the previous values ``field.previous(k)`` before
     running, e.g. to an exact solution or a finer start-up run, and pass
-    ``given_history=True``.
+    ``given_history=True``. The given values are taken one step of the first
+    step's size apart.
 
     Args:
         order: 1, 2 or 3.
@@ -145,10 +183,8 @@ class BDF(TimeScheme):
         blend: float = 1.0,
         given_history: bool = False,
     ):
-        if order not in _BDF_WEIGHTS:
-            raise ValueError(
-                f"BDF order must be one of {sorted(_BDF_WEIGHTS)}, got {order}."
-            )
+        if order not in _BDF_ORDERS:
+            raise ValueError(f"BDF order must be one of {_BDF_ORDERS}, got {order}.")
         if not 0.0 <= blend <= 1.0:
             raise ValueError(f"The blend must lie in [0, 1], got {blend}.")
         if order != 2 and blend != 1.0:
@@ -207,19 +243,32 @@ class BDF(TimeScheme):
             )
         return result
 
-    def set_step(self, step: int, dt: float, discretization: Discretization) -> None:
+    def set_step(
+        self,
+        step: int,
+        dt: float,
+        discretization: Discretization,
+        previous: Sequence[float] = (),
+    ) -> None:
         """Set the weights for a time step.
 
         Args:
             step: Number of the step, starting at 1.
             dt: Time step size.
             discretization: The discretization holding the weight values.
+            previous: Sizes of the steps before, most recent first. Missing
+                ones, e.g. of a given history or of a loop that steps with
+                one size, are taken equal to ``dt``.
         """
         _check_step(step, dt)
+        if any(not size > 0 for size in previous):
+            raise ValueError(f"Step sizes must be positive, got {list(previous)}.")
         order = self._order if self._given_history else min(self._order, step)
-        values = [*_BDF_WEIGHTS[order], *[0.0] * (self._order - order)]
+        steps = [dt, *previous[: order - 1]]
+        steps += [dt] * (order - len(steps))
+        values = [*_bdf_weights(steps), *[0.0] * (self._order - order)]
         if order == 2:
-            first = [*_BDF_WEIGHTS[1], *[0.0] * (self._order - 1)]
+            first = [*_bdf_weights([dt]), *[0.0] * (self._order - 1)]
             values = [
                 self._blend * a + (1 - self._blend) * b
                 for a, b in zip(values, first, strict=True)
@@ -228,9 +277,7 @@ class BDF(TimeScheme):
             # Only the weights of domains this discretization's systems use
             if parameters[0] not in discretization:
                 continue
-            discretization.set(
-                {p: v / dt for p, v in zip(parameters, values, strict=True)}
-            )
+            discretization.set(dict(zip(parameters, values, strict=True)))
 
 
 class Theta(TimeScheme):
@@ -319,20 +366,28 @@ class Theta(TimeScheme):
             return steps[0], {}
         return ResidualSum(steps, name=model.name), {}
 
-    def set_step(self, step: int, dt: float, discretization: Discretization) -> None:
+    def set_step(
+        self,
+        step: int,
+        dt: float,
+        discretization: Discretization,
+        previous: Sequence[float] = (),
+    ) -> None:
+        """Set ``1 / dt`` and the previous time; a one-step method needs no
+        previous step sizes."""
         _check_step(step, dt)
         for rate in self._rates.values():
             if rate in discretization:
                 discretization.set({rate: 1 / dt})
-        previous = self._previous_time
+        previous_time = self._previous_time
         # Only a step whose forms use the time holds the previous time
         if (
             self._clock is not None
-            and previous is not None
-            and previous in discretization
+            and previous_time is not None
+            and previous_time in discretization
         ):
             t = float(discretization.value(self._clock.t))
-            discretization.set({previous: t - dt})
+            discretization.set({previous_time: t - dt})
 
 
 class CrankNicolson(Theta):
@@ -415,7 +470,7 @@ class _ThetaStep(Residual):
 
 
 class AdaptiveTimeStep:
-    """A time step adapted to the Newton iterations, for one-step schemes.
+    """A time step adapted to the Newton iterations.
 
     After a solve with fewer Newton iterations than ``target_iterations``
     the step grows by ``growth_factor``, and after one with more it is cut

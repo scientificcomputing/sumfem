@@ -11,6 +11,7 @@ import os
 import pathlib
 import platform
 import typing
+import weakref
 from collections.abc import Iterable, Mapping
 
 import petsc4py
@@ -32,7 +33,7 @@ from ..symbolic.system import build_system
 from ..symbolic.terminals import Parameter
 from ..symbolic.time import Clock, time_derivative_expressions, time_derivative_fields
 from .solver import DEFAULT_PETSC_OPTIONS, FACTORIZED_PETSC_OPTIONS, Solver
-from .time_stepping import BDF, AdaptiveTimeStep, TimeScheme
+from .time_stepping import AdaptiveTimeStep, TimeScheme
 
 Callback = typing.Callable[[float, int], None]
 """Called after a step with the time and the step number."""
@@ -63,6 +64,18 @@ class Simulation:
     the system with a :class:`~sumfem.solvers.solver.Solver`, and advances
     the history. A steady problem needs no simulation: solve the model with
     a :class:`~sumfem.solvers.solver.Solver`.
+
+    A simulation may run in parts, e.g. to change a load or the step size
+    between them. The first run starts the history from the current values;
+    later runs continue from where the last one ended, with the history, the
+    numbering of the steps and the output of the earlier runs, so a
+    multistep scheme keeps its order across them. :meth:`restart` starts
+    afresh, e.g. from new initial values.
+
+    Output stays open across the runs. Close it with :meth:`close`, or by
+    using the simulation in a ``with`` block. Every process must close it at
+    the same point, as writing is collective; an output left open is closed
+    when the simulation is garbage collected or the program ends.
 
     Args:
         discretization: The meshes and the functions of all terminals.
@@ -122,6 +135,18 @@ class Simulation:
     _time_scale: float
     """Reference time of the time derivatives, in seconds."""
 
+    _started: bool
+    """Whether a run has started the history."""
+
+    _steps_taken: int
+    """Number of steps since the start."""
+
+    _step_sizes: list[float]
+    """Sizes of the latest steps, most recent first."""
+
+    _writer: _Writer | None
+    """The open output, if any."""
+
     def __init__(
         self,
         discretization: Discretization,
@@ -147,6 +172,10 @@ class Simulation:
         self._scheme = scheme
         self._petsc_options = dict(petsc_options or {})
         self._output = output
+        self._started = False
+        self._steps_taken = 0
+        self._step_sizes = []
+        self._writer = None
         bcs = list(bcs)
         discretization.add(clock)
         discretization.add(*(bc for bc in bcs if isinstance(bc, symbolic.DirichletBC)))
@@ -186,20 +215,50 @@ class Simulation:
         """The solver of one step."""
         return self._solver
 
+    @property
+    def steps_taken(self) -> int:
+        """Number of steps since the start, over all runs."""
+        return self._steps_taken
+
+    def restart(self) -> None:
+        """Start afresh at the next run.
+
+        The next run starts the history from the current values, e.g. new
+        initial values, numbers its steps from one, and opens the output
+        again, which overwrites the earlier files.
+        """
+        self.close()
+        self._started = False
+        self._steps_taken = 0
+        self._step_sizes = []
+
+    def close(self) -> None:
+        """Close the output. A later run opens it again, overwriting it."""
+        if self._writer is not None:
+            self._writer.close()
+            self._writer = None
+
+    def __enter__(self) -> Simulation:
+        return self
+
+    def __exit__(self, *exc: typing.Any) -> None:
+        self.close()
+
     def run(
         self,
         num_steps: int | None = None,
         t_end: float | None = None,
         callback: Callback | None = None,
     ) -> None:
-        """Take time steps of the clock's step size.
+        """Take time steps of the clock's step size, from the clock's time.
 
         Args:
             num_steps: Number of time steps.
             t_end: End time, a whole number of steps after the start. Give
                 exactly one of ``num_steps`` and ``t_end``.
             callback: Called after each step with the time and the step
-                number, e.g. to post-process.
+                number, counted over all runs since the start, e.g. to
+                post-process.
 
         Raises:
             ValueError: For inconsistent time arguments, or without a time
@@ -208,39 +267,59 @@ class Simulation:
         disc, clock = self._discretization, self._clock
         if not disc.has_value(clock.dt):
             raise ValueError(f"Set the time step {clock.dt.name!r} before running.")
-        t0 = self._start()
         dt = float(disc.value(clock.dt))
+        t0 = float(disc.value(clock.t))
         num_steps = _number_of_steps(t0, dt, num_steps, t_end)
-        with _Writer(self) as writer:
-            writer.write(t0)
-            for step in range(1, num_steps + 1):
-                t = t0 + step * dt
-                self._set_time(step, t, dt)
-                self._solver.solve()
-                self._finish_step(t, step, writer, callback)
+        self._start()
+        for k in range(1, num_steps + 1):
+            t = t0 + k * dt
+            self._set_time(t, dt)
+            self._solver.solve()
+            self._finish_step(t, dt, callback)
+        self._end()
 
     def _start(self) -> float:
-        """Start a run: set up the history, and return the time."""
-        disc = self._discretization
-        if self._scheme is None or not self._scheme.given_history:
-            disc.initialize_history()
-        return float(disc.value(self._clock.t))
+        """Start a run, and return the time.
 
-    def _set_time(self, step: int, t: float, dt: float) -> None:
-        """Set the time and step size of a step, and the scheme's weights."""
+        The first run after the start sets up the history, unless the scheme
+        has a given history, and opens the output with the initial values.
+        """
+        disc = self._discretization
+        t = float(disc.value(self._clock.t))
+        if not self._started:
+            if self._scheme is None or not self._scheme.given_history:
+                disc.initialize_history()
+            self._started = True
+            if self._output is not None:
+                self._writer = _Writer(self._output, disc)
+                self._writer.open(self.metadata())
+                self._writer.write(t)
+        return t
+
+    def _set_time(self, t: float, dt: float) -> None:
+        """Set the time and step size of the next step, and the scheme's weights."""
         disc = self._discretization
         disc.set({self._clock.t: t, self._clock.dt: dt})
         if self._scheme is not None:
-            self._scheme.set_step(step, dt, disc)
+            self._scheme.set_step(
+                self._steps_taken + 1, dt, disc, tuple(self._step_sizes)
+            )
 
-    def _finish_step(
-        self, t: float, step: int, writer: _Writer, callback: Callback | None
-    ) -> None:
+    def _finish_step(self, t: float, dt: float, callback: Callback | None) -> None:
         """Advance the history, write, and call back after a step."""
         self._discretization.advance_history()
-        writer.write(t, step)
+        self._steps_taken += 1
+        # BDF3, the longest history, needs the two steps before the next one
+        self._step_sizes = [dt, *self._step_sizes][:2]
+        if self._writer is not None:
+            self._writer.write(t, self._steps_taken)
         if callback is not None:
-            callback(t, step)
+            callback(t, self._steps_taken)
+
+    def _end(self) -> None:
+        """End a run: write the files that are rewritten after every run."""
+        if self._writer is not None:
+            self._writer.flush()
 
     def metadata(self) -> dict[str, typing.Any]:
         """A description of the simulation, for archiving with its results."""
@@ -304,14 +383,17 @@ class AdaptiveSimulation(Simulation):
         model: See :class:`Simulation`.
         time_step: The rules of the steps.
         clock: The time and time step.
-        scheme: A one-step scheme: BDF of order one, or a theta method.
+        scheme: A time-stepping scheme. BDF of order two or three adapts
+            its weights to the changing steps; it stays stable while the
+            steps grow slowly, see :class:`~sumfem.solvers.time_stepping.BDF`.
         **kwargs: The other arguments of :class:`Simulation`. The
             ``time_scale`` defaults to the largest step, if it is a number,
             so that the absolute tolerance of Newton's method is no looser
             for any step than for the largest; otherwise to the first step.
 
-    Raises:
-        ValueError: With a scheme of more than one step.
+    Like a :class:`Simulation`, it may run in parts. Each run starts with
+    the initial step of the rules, as a run usually starts at a change, e.g.
+    of a load, that a long step could miss.
     """
 
     _time_step: AdaptiveTimeStep
@@ -326,11 +408,6 @@ class AdaptiveSimulation(Simulation):
         scheme: TimeScheme | None = None,
         **kwargs: typing.Any,
     ):
-        if isinstance(scheme, BDF) and scheme.order > 1:
-            raise ValueError(
-                f"BDF of order {scheme.order} assumes equal steps. Adapt the steps "
-                "with BDF(1) or a theta method."
-            )
         if kwargs.get("time_scale") is None:
             largest = time_step.max_step
             kwargs["time_scale"] = (
@@ -344,12 +421,13 @@ class AdaptiveSimulation(Simulation):
     def run(  # type: ignore[override]
         self, t_end: float, callback: Callback | None = None
     ) -> None:
-        """Step to the end time.
+        """Step from the clock's time to the end time.
 
         Args:
             t_end: End time.
             callback: Called after each step with the time and the step
-                number, e.g. to post-process.
+                number, counted over all runs since the start, e.g. to
+                post-process.
 
         Raises:
             RuntimeError: If a step fails after its retries.
@@ -357,30 +435,28 @@ class AdaptiveSimulation(Simulation):
         rules = self._time_step
         t = self._start()
         dt = rules.initial
-        step = 0
-        with _Writer(self) as writer:
-            writer.write(t)
-            while t < t_end and not math.isclose(
-                t, t_end, rel_tol=rules.milestone_tolerance
-            ):
-                dt = rules.limit(dt, t, t_end)
-                before = [owned(f).copy() for f in self._solver.system.solution]
-                for attempt in range(rules.max_retries + 1):
-                    self._set_time(step + 1, t + dt, dt)
-                    if self._try_step():
-                        break
-                    self._restore(before)
-                    retried = rules.retry(dt)
-                    if attempt == rules.max_retries or retried is None:
-                        raise RuntimeError(
-                            f"The step from t = {t} failed with dt = {dt}, after "
-                            f"{attempt} retries."
-                        )
-                    dt = retried
-                t += dt
-                step += 1
-                self._finish_step(t, step, writer, callback)
-                dt = rules.next(dt, self._solver.iterations)
+        while t < t_end and not math.isclose(
+            t, t_end, rel_tol=rules.milestone_tolerance
+        ):
+            dt = rules.limit(dt, t, t_end)
+            before = [owned(f).copy() for f in self._solver.system.solution]
+            for attempt in range(rules.max_retries + 1):
+                self._set_time(t + dt, dt)
+                if self._try_step():
+                    break
+                self._restore(before)
+                retried = rules.retry(dt)
+                if attempt == rules.max_retries or retried is None:
+                    self._end()
+                    raise RuntimeError(
+                        f"The step from t = {t} failed with dt = {dt}, after "
+                        f"{attempt} retries."
+                    )
+                dt = retried
+            t += dt
+            self._finish_step(t, dt, callback)
+            dt = rules.next(dt, self._solver.iterations)
+        self._end()
 
     def _try_step(self) -> bool:
         """Solve a step, and whether the solve converged."""
@@ -453,25 +529,23 @@ def _number_of_steps(
 
 
 class _Writer:
-    """Writes fields and metadata for a simulation, if it has an output."""
+    """Writes the fields of a discretization, and metadata, to an output."""
 
-    def __init__(self, simulation: Simulation):
-        self._simulation = simulation
-        self._output = simulation._output
+    def __init__(self, output: Output, discretization: Discretization):
+        self._output = output
+        self._discretization = discretization
+        self._comm = next(iter(discretization.fields.values())).function_space.mesh.comm
         self._vtx: list[dolfinx.io.VTXWriter] = []
         self._real: dict[str, dolfinx.fem.Function] = {}
         self._real_rows: list[list[float]] = []
+        self._finalizer: weakref.finalize | None = None
 
-    def __enter__(self) -> _Writer:
-        output = self._output
-        if output is None:
-            return self
-        disc = self._simulation.discretization
-        comm = next(iter(disc.fields.values())).function_space.mesh.comm
+    def open(self, metadata: dict[str, typing.Any]) -> None:
+        """Create the directory, write the metadata and open the writers."""
+        output, disc, comm = self._output, self._discretization, self._comm
         directory = pathlib.Path(output.directory)
         if comm.rank == 0:
             directory.mkdir(parents=True, exist_ok=True)
-            metadata = self._simulation.metadata()
             (directory / "metadata.json").write_text(json.dumps(metadata, indent=2))
         comm.barrier()
         names = sorted(disc.fields) if output.fields is None else list(output.fields)
@@ -484,10 +558,12 @@ class _Writer:
                 self._vtx.append(
                     dolfinx.io.VTXWriter(comm, directory / f"{name}.bp", [function])
                 )
-        return self
+        # Close the writers if the simulation is dropped without closing them
+        self._finalizer = weakref.finalize(self, _close_writers, self._vtx)
 
     def write(self, t: float, step: int = 0) -> None:
-        if self._output is None or step % self._output.every != 0:
+        """Write the fields at a time, at every chosen step."""
+        if step % self._output.every != 0:
             return
         for writer in self._vtx:
             writer.write(t)
@@ -496,19 +572,23 @@ class _Writer:
                 [t, *(float(f.x.array[0]) for f in self._real.values())]
             )
 
-    def __exit__(self, *exc: typing.Any) -> None:
-        for writer in self._vtx:
-            writer.close()
-        if self._output is not None and self._real:
-            disc = self._simulation.discretization
-            comm = next(iter(disc.fields.values())).function_space.mesh.comm
-            if comm.rank == 0:
-                path = pathlib.Path(self._output.directory) / "real_fields.csv"
-                header = ",".join(["t", *self._real])
-                np.savetxt(
-                    path,
-                    np.array(self._real_rows),
-                    delimiter=",",
-                    header=header,
-                    comments="",
-                )
+    def flush(self) -> None:
+        """Write the values of the real fields so far."""
+        if not self._real or self._comm.rank != 0:
+            return
+        path = pathlib.Path(self._output.directory) / "real_fields.csv"
+        header = ",".join(["t", *self._real])
+        np.savetxt(
+            path, np.array(self._real_rows), delimiter=",", header=header, comments=""
+        )
+
+    def close(self) -> None:
+        """Write the real fields and close the writers."""
+        self.flush()
+        if self._finalizer is not None:
+            self._finalizer()
+
+
+def _close_writers(writers: list[dolfinx.io.VTXWriter]) -> None:
+    for writer in writers:
+        writer.close()
