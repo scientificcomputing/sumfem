@@ -20,6 +20,7 @@ parts:
   - caption: "Demos"
     chapters:
       - file: "examples/heat_bdf2.py"
+      - file: "examples/cooling_plate.py"
   - caption: "Electrochemistry"
     chapters:
       - file: "examples/electrochemistry/porous_electrode.py"

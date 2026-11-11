@@ -450,3 +450,68 @@ def test_a_zero_residual_changes_nothing(toy, square, sides):
         Simulation(disc, summed, bcs=bcs, clock=clock, scheme=BDF()).run(num_steps=2)
         values.append(disc.function(u).x.array.copy())
     np.testing.assert_allclose(values[1], values[0], atol=1e-14)
+
+
+def scaled_heat(square, sides, **kwargs):
+    """A simulation of heat conduction in SI units, in dimensionless form."""
+    domain = Domain("cell", "triangle")
+    u = Field("u", domain, ("Lagrange", 1), unit=syu.K, scale=10.0)
+
+    class Heat(Residual):
+        def residual(self):
+            D = self.parameter("D", domain, default=1e-2, unit=syu.m**2 / syu.s)
+            dx = domain.dx()
+            return (
+                ufl.inner(u.dot, u.v) * dx
+                + D * ufl.inner(ufl.grad(u), ufl.grad(u.v)) * dx
+            )
+
+    disc = discretize([], DomainMaps({"cell": square()}))
+    clock = Clock(domain, dt=1e-3)
+    bcs = [DirichletBC(u, sides, 0.0)]
+    simulation_type = kwargs.pop("simulation", Simulation)
+    simulation = simulation_type(
+        disc,
+        Heat("heat"),
+        bcs=bcs,
+        clock=clock,
+        scheme=BDF(1),
+        factorize_equations=True,
+        **kwargs,
+    )
+    return simulation
+
+
+def test_the_time_scale_sizes_the_equations(square, sides):
+    """By default the step; the stored change over it dominates the equation,
+    so its size is inversely proportional to the reference time."""
+    default = scaled_heat(square, sides)
+    longer = scaled_heat(square, sides, time_scale=1e-2)
+    assert default.metadata()["time"]["time_scale"] == pytest.approx(1e-3)
+    assert longer.metadata()["time"]["time_scale"] == pytest.approx(1e-2)
+    (size,) = default.solver.system.symbolic.equation_scales.values()
+    (longer_size,) = longer.solver.system.symbolic.equation_scales.values()
+    assert size / longer_size == pytest.approx(10.0)
+    with pytest.raises(ValueError, match="time scale must be positive"):
+        scaled_heat(square, sides, time_scale=0.0)
+
+
+@pytest.mark.parametrize(
+    "max_step, expected", [(0.1, 0.1), (lambda t: 0.1, 1e-3), (None, 1e-3)]
+)
+def test_adaptive_steps_are_scaled_by_the_largest_step(
+    square, sides, max_step, expected
+):
+    """So that the absolute tolerance is no looser for any step than for the
+    largest; without a largest number, the first step."""
+    simulation = scaled_heat(
+        square,
+        sides,
+        simulation=lambda disc, model, **kwargs: AdaptiveSimulation(
+            disc,
+            model,
+            AdaptiveTimeStep(1e-3, growth_factor=2.0, max_step=max_step),
+            **kwargs,
+        ),
+    )
+    assert simulation.metadata()["time"]["time_scale"] == pytest.approx(expected)

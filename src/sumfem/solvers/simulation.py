@@ -78,8 +78,16 @@ class Simulation:
             see :func:`~sumfem.symbolic.units.check_units`.
         factorize_equations: Solve in dimensionless form, see
             :func:`~sumfem.symbolic.system.build_system`. Fields are still
-            stored and written in SI units. The clock's time step is the
-            reference time.
+            stored and written in SI units.
+        time_scale: Reference time in seconds of the time derivatives, for
+            the unit check and the sizes of factorized equations. Defaults to
+            the clock's time step, which makes the change over one step, the
+            dominant term of a step, of order one; without a step, to one
+            second. The size divides each equation by one number, so it does
+            not change the solution or Newton's iterates, but it gives
+            Newton's absolute tolerance its meaning: a reference time far
+            below the steps makes the scaled residual small, and stops
+            Newton's method early.
 
     The simulation declares on the discretization what it creates: the
     clock, the system with the terminals of the time-stepping scheme, and
@@ -111,6 +119,9 @@ class Simulation:
     _output: Output | None
     """Where and what to write, if anything."""
 
+    _time_scale: float
+    """Reference time of the time derivatives, in seconds."""
+
     def __init__(
         self,
         discretization: Discretization,
@@ -123,6 +134,7 @@ class Simulation:
         output: Output | None = None,
         check_units: bool = False,
         factorize_equations: bool = False,
+        time_scale: float | None = None,
     ):
         if clock is None:
             raise ValueError(
@@ -138,9 +150,13 @@ class Simulation:
         bcs = list(bcs)
         discretization.add(clock)
         discretization.add(*(bc for bc in bcs if isinstance(bc, symbolic.DirichletBC)))
-        time_scale = 1.0
-        if discretization.has_value(clock.dt):
-            time_scale = float(discretization.value(clock.dt))
+        if time_scale is None:
+            time_scale = 1.0
+            if discretization.has_value(clock.dt):
+                time_scale = float(discretization.value(clock.dt))
+        if not time_scale > 0:
+            raise ValueError(f"The time scale must be positive, got {time_scale}.")
+        self._time_scale = time_scale
         if scheme is None:
             if time_derivative_fields(model) or time_derivative_expressions(model):
                 raise ValueError(
@@ -256,6 +272,7 @@ class Simulation:
             "scheme": None
             if self._scheme is None
             else {"type": type(self._scheme).__name__, "order": self._scheme.order},
+            "time_scale": self._time_scale,
         }
         return {
             "created": datetime.datetime.now(datetime.UTC).isoformat(),
@@ -288,7 +305,10 @@ class AdaptiveSimulation(Simulation):
         time_step: The rules of the steps.
         clock: The time and time step.
         scheme: A one-step scheme: BDF of order one, or a theta method.
-        **kwargs: The other arguments of :class:`Simulation`.
+        **kwargs: The other arguments of :class:`Simulation`. The
+            ``time_scale`` defaults to the largest step, if it is a number,
+            so that the absolute tolerance of Newton's method is no looser
+            for any step than for the largest; otherwise to the first step.
 
     Raises:
         ValueError: With a scheme of more than one step.
@@ -310,6 +330,13 @@ class AdaptiveSimulation(Simulation):
             raise ValueError(
                 f"BDF of order {scheme.order} assumes equal steps. Adapt the steps "
                 "with BDF(1) or a theta method."
+            )
+        if kwargs.get("time_scale") is None:
+            largest = time_step.max_step
+            kwargs["time_scale"] = (
+                float(largest)
+                if isinstance(largest, int | float)
+                else time_step.initial
             )
         super().__init__(discretization, model, clock=clock, scheme=scheme, **kwargs)
         self._time_step = time_step

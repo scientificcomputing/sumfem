@@ -73,6 +73,7 @@ def test_output_and_metadata(toy, square, tmp_path):
         "t0": 0.0,
         "dt": 0.5,
         "scheme": {"type": "BDF", "order": 1},
+        "time_scale": 0.5,
     }
     assert metadata["meshes"]["cell"]["cell_type"] == "triangle"
 
