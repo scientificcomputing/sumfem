@@ -40,6 +40,10 @@ jobs:
       options: --dns 1.1.1.1 --dns 8.8.8.8
     env:
       ASSET: ${{ inputs.asset }}
+      PYVISTA_OFF_SCREEN: false
+      PYVISTA_JUPYTER_BACKEND: "html"
+      VTK_DEFAULT_OPENGL_WINDOW: vtkOSOpenGLRenderWindow
+
 
     steps:
       - name: Check out the version
