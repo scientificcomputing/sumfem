@@ -8,6 +8,10 @@ https://github.com/festim-dev/festim, and SMART,
 https://github.com/RangamaniLabUCSD/smart. Diffusion, accumulation and
 sources of the species are the models of :mod:`sumfem.models.diffusion`,
 on volumes and surfaces alike.
+
+The rates are written with the laws of :func:`mass_action`, of
+:func:`arrhenius` for the rate constants, and of :func:`butler_volmer` for
+the current density of an electrode reaction.
 """
 
 from __future__ import annotations
@@ -32,7 +36,7 @@ from sumfem.symbolic import (
 from sumfem.symbolic.expressions import replace
 from sumfem.symbolic.si import to_si
 
-__all__ = ["RateReaction", "Reaction", "arrhenius", "mass_action"]
+__all__ = ["RateReaction", "Reaction", "arrhenius", "butler_volmer", "mass_action"]
 
 Participants = typing.Mapping[ufl.core.expr.Expr, int]
 """Species and their stoichiometric coefficients."""
@@ -100,6 +104,32 @@ def arrhenius(
     else:
         k_B = boltzmann
     return as_expr(prefactor) * ufl.exp(-as_expr(activation_energy) / (k_B * T))
+
+
+def butler_volmer(
+    exchange_current: ufl.core.expr.Expr,
+    scaled_overpotential: ufl.core.expr.Expr,
+    anodic_transfer: ufl.core.expr.Expr | float = 0.5,
+    cathodic_transfer: ufl.core.expr.Expr | float = 0.5,
+) -> ufl.core.expr.Expr:
+    """Butler-Volmer's current density ``i0 (exp(alpha_a x) - exp(-alpha_c x))``.
+
+    The current density of an electrode reaction at the overpotential
+    ``eta``, by the Butler-Volmer equation of
+    `Butler, 1924 <https://doi.org/10.1039/TF9241900729>`_ and
+    `Erdey-Grúz and Volmer, 1930 <https://doi.org/10.1515/zpch-1930-15020>`_.
+
+    Args:
+        exchange_current: Exchange current density ``i0``.
+        scaled_overpotential: The overpotential over the thermal voltage per
+            electron, ``x = n F eta / (R T)``.
+        anodic_transfer: Anodic transfer coefficient ``alpha_a``.
+        cathodic_transfer: Cathodic transfer coefficient ``alpha_c``.
+    """
+    return exchange_current * (
+        ufl.exp(anodic_transfer * scaled_overpotential)
+        - ufl.exp(-cathodic_transfer * scaled_overpotential)
+    )
 
 
 class RateReaction(Residual):

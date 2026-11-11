@@ -18,6 +18,9 @@
 
 .. autoclass:: Poisson
    :members:
+
+.. autoclass:: Conduction
+   :members:
 ```
 
 ## Boundaries
@@ -55,6 +58,20 @@
 .. autofunction:: mass_action
 
 .. autofunction:: arrhenius
+
+.. autofunction:: butler_volmer
+```
+
+## Porous media
+
+```{eval-rst}
+.. autofunction:: bruggeman
+
+.. autofunction:: kozeny_carman
+
+.. autofunction:: kozeny_carman_permeability
+
+.. autofunction:: ergun_coefficient
 ```
 
 ## Operators
