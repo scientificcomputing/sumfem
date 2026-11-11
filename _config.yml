@@ -61,6 +61,13 @@ sphinx:
         - fmt: py
     # A tutorial or demo that raises fails the build, instead of a warning
     nb_execution_raise_on_error: true
+    # Pages that cite references cited elsewhere too list them as footnotes,
+    # {footcite} and {footbibliography}. MyST checks footnotes before
+    # sphinxcontrib-bibtex creates them, and warns about each; the book has
+    # no MyST footnotes of its own
+    suppress_warnings: ["myst.footnote"]
+    # No rule before the footnotes, which end a page under References
+    myst_footnote_transition: false
     autodoc_member_order: bysource
     # The page tables of contents list objects by name, without their module
     toc_object_entries_show_parents: hide

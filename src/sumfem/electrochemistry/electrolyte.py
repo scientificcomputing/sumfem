@@ -6,6 +6,7 @@ import dataclasses
 import types
 import typing
 
+import sympy
 import sympy.physics.units as syu
 import ufl
 
@@ -33,8 +34,9 @@ class Ion:
     Attributes:
         name: Name of the ion, e.g. ``"V2"``.
         charge: Charge number ``z``.
-        diffusivity: Diffusion coefficient in free electrolyte, in m^2/s.
-            It is the default value of the parameter the electrolyte creates.
+        diffusivity: Diffusion coefficient in free electrolyte, in m^2/s or a
+            quantity with units, e.g. ``1e-9 * syu.m**2 / syu.s``. It is the
+            default value of the parameter the electrolyte creates.
         concentration: The field of a transported ion. ``None`` for the one
             ion whose concentration follows from electroneutrality.
         positive: Use a smooth positive part of the concentration in the
@@ -44,7 +46,7 @@ class Ion:
 
     name: str
     charge: float
-    diffusivity: float
+    diffusivity: float | sympy.Expr
     concentration: Field | None = None
     positive: bool = False
 
@@ -91,7 +93,8 @@ class Electrolyte:
 
     Raises:
         ValueError: If there are ions but none has a field, more than one
-            ion has none, or two ions share a name.
+            ion has none, the ion without one has no charge, or two ions
+            share a name.
     """
 
     _name: str
@@ -142,6 +145,11 @@ class Electrolyte:
             raise ValueError(
                 "At most one ion can follow from electroneutrality, got "
                 f"{[ion.name for ion in balanced]}."
+            )
+        if balanced and balanced[0].charge == 0:
+            raise ValueError(
+                f"Ion {balanced[0].name!r} has no charge, so electroneutrality "
+                "cannot give its concentration. Give it a field."
             )
         if balanced and len(balanced) == len(ions):
             raise ValueError(

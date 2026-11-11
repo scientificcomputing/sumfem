@@ -49,3 +49,10 @@
 .. autoclass:: MassTransferButlerVolmer
    :members:
 ```
+
+## Half-cells
+
+```{eval-rst}
+.. autoclass:: RedoxHalfCell
+   :members:
+```

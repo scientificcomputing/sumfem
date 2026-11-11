@@ -48,7 +48,7 @@ from .coupling import Sequential
 from .domains import Domain, Subdomain
 from .expressions import as_expr
 from .system import System, build_system
-from .terminals import Field, KnownCoefficient, Parameter
+from .terminals import Field, KnownCoefficient, Parameter, value_at_defaults
 from .time import Clock, Dt
 from .transfer import Assignment, Interpolation, Transfer, Transferable
 from .ufl_forms import UFLResidual
@@ -105,4 +105,5 @@ __all__ = [
     "equation_dimensions",
     "equation_scales",
     "pi_groups",
+    "value_at_defaults",
 ]

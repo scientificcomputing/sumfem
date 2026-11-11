@@ -39,7 +39,8 @@ from ufl_units import QuantityMixin
 from ..error_handling import ComponentError, check_name, qualified_name
 from .domains import Domain, domain_of
 from .elements import ElementSpec, as_element
-from .si import Unit, to_si
+from .expressions import evaluate_constant
+from .si import Unit, has_units, si_factor, to_si
 
 _PIOLA = (
     ufl.pullback.contravariant_piola,
@@ -58,6 +59,7 @@ __all__ = [
     "Parameter",
     "TimeDerivative",
     "field_of",
+    "value_at_defaults",
 ]
 
 # Map from the part number of a field's test and trial functions to the
@@ -442,14 +444,20 @@ class Parameter(ufl.Coefficient, QuantityMixin):
             named ``"<component>.<name>"``.
         domain: The domain the parameter is defined on.
         shape: Value shape, ``()`` for a scalar.
-        default: Default value in ``unit``, used when no other value is set.
-            A scalar sets every component of a vector or tensor parameter.
+        default: Default value in ``unit``, used when no other value is set,
+            or a sympy quantity carrying its own units, e.g. ``0.5 *
+            syu.millimeter``, converted to ``unit``. A scalar sets every
+            component of a vector or tensor parameter.
         unit: Unit of the value, a sympy unit expression. ``None`` means
             dimensionless. The discretization stores values in SI base units.
         doc: Description, shown in documentation and archived metadata.
 
     The name must be passed positionally: ``ufl.Coefficient.__new__`` reads
     the first positional argument.
+
+    Raises:
+        ValueError: If a default with units does not have the dimension of
+            ``unit``.
     """
 
     _name: str
@@ -467,7 +475,7 @@ class Parameter(ufl.Coefficient, QuantityMixin):
         /,
         domain: Domain,
         shape: tuple[int, ...] = (),
-        default: npt.ArrayLike | None = None,
+        default: npt.ArrayLike | sympy.Expr | None = None,
         unit: Unit | None = None,
         doc: str = "",
     ):
@@ -484,6 +492,12 @@ class Parameter(ufl.Coefficient, QuantityMixin):
         space = ufl.FunctionSpace(domain, element, label=f"{name}#parameter")
         ufl.Coefficient.__init__(self, space)
         self._name = name
+        if has_units(default):
+            # A quantity with its own units, as a value in the declared unit
+            default = to_si(default, unit) / si_factor(unit)
+        elif isinstance(default, sympy.Expr) and default.is_number:
+            # A zero quantity, e.g. 0 * syu.pascal, which sympy reduces to 0
+            default = float(default)
         self._default = (
             None if default is None else _validate_value(name, default, shape)
         )
@@ -520,6 +534,51 @@ class Parameter(ufl.Coefficient, QuantityMixin):
     def doc(self) -> str:
         """Description of the parameter."""
         return self._doc
+
+
+def value_at_defaults(expr: ufl.core.expr.Expr) -> float | npt.NDArray[np.float64]:
+    """The value of an expression of parameters at their defaults, in SI units.
+
+    Use it for a value that follows from the parameters of a model before
+    anything is discretized, e.g. the permeability of an electrode or the
+    pressure drop of a flow, as the scale of a field.
+
+    Args:
+        expr: An expression of parameters and numbers.
+
+    Raises:
+        ComponentError: If the expression depends on anything but parameters
+            with defaults, e.g. a field or the spatial coordinate.
+
+    Example:
+        The scale of a pressure from a viscosity, a velocity, a length and a
+        permeability, all parameters::
+
+            p = Field("p", domain, ("Lagrange", 1), unit=syu.pascal,
+                      scale=value_at_defaults(mu * v * L / K))
+    """
+    defaults: dict[ufl.Coefficient, ufl.core.expr.Expr] = {}
+    for c in ufl.algorithms.extract_coefficients(expr):
+        default = c.default_si if isinstance(c, Parameter) else None
+        if default is None:
+            name = getattr(c, "name", str(c))
+            raise ComponentError(
+                f"The expression depends on {name!r}, which is not a parameter "
+                "with a default."
+            )
+        defaults[c] = (
+            ufl.as_ufl(float(default))
+            if default.ndim == 0
+            else (ufl.as_tensor(default.tolist()))
+        )
+    replaced = ufl.replace(expr, defaults) if defaults else expr
+    try:
+        return evaluate_constant(replaced)
+    except TypeError as error:
+        raise ComponentError(
+            "The expression depends on more than parameters, e.g. on the "
+            "spatial coordinate."
+        ) from error
 
 
 class KnownCoefficient(ufl.Coefficient, QuantityMixin):

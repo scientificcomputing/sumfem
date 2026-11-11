@@ -44,6 +44,8 @@
    :members:
 
 .. autofunction:: as_expr
+
+.. autofunction:: value_at_defaults
 ```
 
 ## Components
@@ -121,7 +123,11 @@
 .. autoclass:: Interpolation
    :members:
 
+.. currentmodule:: sumfem.symbolic.transfer
+
 .. autodata:: Transferable
+
+.. currentmodule:: sumfem.symbolic
 ```
 
 ## Units and dimensional analysis
@@ -140,11 +146,19 @@
 
 .. autoexception:: UnitError
 
+.. currentmodule:: sumfem.symbolic.constants
+
 .. autodata:: BOLTZMANN
+
+.. currentmodule:: sumfem.symbolic.constants
 
 .. autodata:: FARADAY
 
+.. currentmodule:: sumfem.symbolic.constants
+
 .. autodata:: GAS_CONSTANT
+
+.. currentmodule:: sumfem.symbolic
 
 .. autofunction:: boltzmann_constant
 ```
