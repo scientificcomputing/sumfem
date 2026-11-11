@@ -1,7 +1,8 @@
 """Meshes and the original RFBniCS forms, for comparison with the models.
 
 The reference residuals are transcribed from the examples of RFBniCS
-(https://github.com/Ah-Aghabarari/RFBniCS, MIT licence), with one change:
+(https://github.com/Ah-Aghabarari/RFBniCS, MIT licence; Aghabarari et al.,
+2026, https://arxiv.org/abs/2610.01840), with one change:
 each unknown is its own function, where RFBniCS splits one blocked
 function. The tests pass the functions of a discretization, so both sides
 assemble on the same spaces.

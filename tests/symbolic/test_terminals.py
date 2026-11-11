@@ -11,6 +11,7 @@ from sumfem.symbolic import (
     KnownCoefficient,
     Parameter,
     as_expr,
+    value_at_defaults,
 )
 from sumfem.symbolic.elements import as_element
 from sumfem.symbolic.terminals import FieldRole, FieldTerminal, field_of
@@ -235,3 +236,30 @@ def test_as_expr(domain):
 
 def test_parameter_names_may_be_qualified(domain):
     assert Parameter("solid.sigma", domain).name == "solid.sigma"
+
+
+def test_a_zero_quantity_is_a_default(domain):
+    """Sympy reduces a zero quantity to the number zero, without units."""
+    parameter = Parameter("p", domain, default=0.0 * syu.pascal, unit=syu.pascal)
+    assert parameter.default_si == 0.0
+
+
+def test_an_expression_of_parameters_has_a_value_at_their_defaults(domain):
+    mu = Parameter("mu", domain, default=2.0)
+    v = Parameter("v", domain, default=[1.0, 3.0], shape=(2,))
+    assert value_at_defaults(mu * ufl.sqrt(ufl.dot(v, v))) == pytest.approx(
+        2.0 * np.sqrt(10.0)
+    )
+    np.testing.assert_allclose(value_at_defaults(mu * v), [2.0, 6.0])
+
+
+def test_a_value_at_defaults_needs_parameters_with_defaults(domain):
+    free = Parameter("free", domain)
+    with pytest.raises(ComponentError, match="'free'"):
+        value_at_defaults(2.0 * free)
+    u = Field("u", domain, ("Lagrange", 1))
+    with pytest.raises(ComponentError, match="'u'"):
+        value_at_defaults(u + 1.0)
+    x = ufl.SpatialCoordinate(domain)
+    with pytest.raises(ComponentError, match="spatial coordinate"):
+        value_at_defaults(x[0] * Parameter("a", domain, default=1.0))

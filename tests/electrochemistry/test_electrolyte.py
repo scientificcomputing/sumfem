@@ -13,7 +13,7 @@ from sumfem.electrochemistry import (
     NernstPlanck,
     PorousElectrode,
 )
-from sumfem.symbolic import Field, build_system
+from sumfem.symbolic import Domain, Field, build_system
 
 CONCENTRATION = syu.mol / syu.m**3
 
@@ -152,3 +152,10 @@ def test_a_vanadium_electrode_has_consistent_units(domain):
     )
     system = build_system(model, check_units=True)
     assert {f.name for f in system.unknowns} >= {"phi_s", "phi_l", "c2", "c3", "h"}
+
+
+def test_the_balanced_ion_needs_a_charge():
+    domain = Domain("cell", "interval")
+    c = Field("c", domain, ("Lagrange", 1))
+    with pytest.raises(ValueError, match="has no charge"):
+        Electrolyte("e", domain, [Ion("A", 1, 1e-9, c), Ion("N", 0, 1e-9)])

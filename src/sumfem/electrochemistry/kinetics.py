@@ -442,7 +442,11 @@ class MassTransferButlerVolmer(ButlerVolmer):
     ``k_m (c - c_s)`` from the bulk. The mass-transfer coefficient of each
     ion is ``k_m = Sh D / d`` with the Sherwood number ``Sh = a Re^b`` and
     the Reynolds number ``Re = rho |u| d / mu`` of the flow past fibers of
-    diameter ``d``. ``D`` is the diffusivity in free electrolyte.
+    diameter ``d``. ``D`` is the diffusivity in free electrolyte. The
+    defaults ``a = 7`` and ``b = 0.4`` are the correlation of `Krishnamurthy
+    et al., 2011 <https://doi.org/10.1016/j.jpowsour.2011.08.024>`_, and the
+    surface concentrations those of equation 20 of `Aghabarari et al., 2026
+    <https://arxiv.org/abs/2610.01840>`_.
 
     Args:
         name: Name of the model.

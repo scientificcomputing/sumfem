@@ -40,6 +40,10 @@ __all__ = ["RedoxHalfCell"]
 class RedoxHalfCell:
     """A half-cell of a redox flow battery, of a couple of dissolved ions.
 
+    The macro-homogeneous porous-electrode model of RFBniCS, `Aghabarari et
+    al., 2026 <https://arxiv.org/abs/2610.01840>`_, Section II, for any
+    couple, electrolyte and sign of the half-cell.
+
     The unknowns are the potentials ``phi_s`` of the solid and ``phi_l`` of
     the electrolyte, in V, and the concentration ``c_<ion>`` of every ion
     with a reservoir concentration, in mol/m^3. The one ion without follows
@@ -90,8 +94,11 @@ class RedoxHalfCell:
         reservoir: The concentration of each transported ion in the
             reservoir, in mol/m^3 or a quantity with units, the default of
             the parameter ``"<name>.c0_<ion>"``.
-        reduced: Name of the reduced ion of the couple.
-        oxidized: Name of the oxidized ion of the couple.
+        reduced: Name of the reduced ion of the couple. With ``oxidized``
+            and ``electrons`` it gives the reaction
+            ``oxidized + n e- <-> reduced``, e.g. V3 + e- <-> V2.
+        oxidized: Name of the oxidized ion of the couple, of ``electrons``
+            more charge than the reduced one.
         electrode: The porous electrode.
         oxidation_on_discharge: Whether discharge oxidizes the couple, as in
             the negative half-cell.
@@ -124,9 +131,11 @@ class RedoxHalfCell:
         name: Prefix of the cell's own parameters.
 
     Raises:
-        ValueError: For mass transfer or an outlet without a velocity, or a
+        ValueError: For mass transfer or an outlet without a velocity, a
             reservoir concentration of an ion that the electrolyte does not
-            have.
+            have, a reservoir that lacks not exactly one ion, an ion of the
+            couple without one, a couple that does not conserve charge, or a
+            balanced ion without charge.
     """
 
     _domain: Domain
@@ -219,6 +228,29 @@ class RedoxHalfCell:
         unknown = sorted(set(reservoir) - {ion.name for ion in ions})
         if unknown:
             raise ValueError(f"The electrolyte has no ions {unknown}.")
+        # The one ion without a reservoir concentration has no field, and
+        # follows from electroneutrality, which closes the equations
+        balanced = [ion.name for ion in ions if ion.name not in reservoir]
+        if len(balanced) != 1:
+            raise ValueError(
+                "The reservoir must give the concentrations of all ions but one, "
+                "whose concentration follows from electroneutrality; it lacks "
+                f"{balanced}."
+            )
+        # The couple is the reaction oxidized + n e- <-> reduced, which must
+        # conserve charge
+        charges = {ion.name: ion.charge for ion in ions}
+        for ion in (reduced, oxidized):
+            if ion not in reservoir:
+                raise ValueError(
+                    f"The ion {ion!r} of the couple needs a reservoir concentration."
+                )
+        if charges[oxidized] - charges[reduced] != electrons:
+            raise ValueError(
+                f"{oxidized} + {electrons} e- <-> {reduced} does not conserve "
+                f"charge: the charges are {charges[oxidized]} and "
+                f"{charges[reduced]}."
+            )
         self._domain = domain
         self._electrode = electrode
         self._reduced, self._oxidized = reduced, oxidized

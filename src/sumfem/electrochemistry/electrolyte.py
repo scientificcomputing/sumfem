@@ -93,7 +93,8 @@ class Electrolyte:
 
     Raises:
         ValueError: If there are ions but none has a field, more than one
-            ion has none, or two ions share a name.
+            ion has none, the ion without one has no charge, or two ions
+            share a name.
     """
 
     _name: str
@@ -144,6 +145,11 @@ class Electrolyte:
             raise ValueError(
                 "At most one ion can follow from electroneutrality, got "
                 f"{[ion.name for ion in balanced]}."
+            )
+        if balanced and balanced[0].charge == 0:
+            raise ValueError(
+                f"Ion {balanced[0].name!r} has no charge, so electroneutrality "
+                "cannot give its concentration. Give it a field."
             )
         if balanced and len(balanced) == len(ions):
             raise ValueError(

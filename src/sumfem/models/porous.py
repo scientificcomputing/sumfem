@@ -22,7 +22,11 @@ def bruggeman(
     It corrects a transport property of a phase for the volume the other
     phase takes and for the tortuosity of the paths through it. The exponent
     ``3/2`` is that of spherical obstructions, see `Tjaden et al., 2016
-    <https://doi.org/10.1016/j.coche.2016.02.006>`_.
+    <https://doi.org/10.1016/j.coche.2016.02.006>`_, where the tortuosity
+    scales with the fraction to the power ``-1/2``. It suits macroporous
+    electrodes; where the tortuosity is measured, the property
+    ``value * fraction / tortuosity`` is the alternative of `Barzegari et
+    al., 2026 <https://doi.org/10.26434/chemrxiv.10001658/v1>`_.
 
     Args:
         value: The property of the phase, e.g. a diffusivity or the
@@ -43,7 +47,11 @@ def kozeny_carman(
 
     An estimate of the permeability of a fibrous porous electrode, such as a
     carbon felt, from the diameter of its fibres, with an empirical constant
-    ``K``.
+    ``K``. The carbon fibres of commercial cloths, papers and felts have
+    diameters of 7 to 9 micrometres, see `Barzegari et al., 2026
+    <https://doi.org/10.26434/chemrxiv.10001658/v1>`_. The estimate is of
+    limited use for complex media, whose permeability is best fitted to
+    measured pressure drops.
 
     Args:
         fiber_diameter: Fiber diameter ``d``.

@@ -201,3 +201,42 @@ def test_post_processing(reference):
     points, values = evaluate_over_line(function, [0.0], [reference.W], 5)
     np.testing.assert_allclose(values[:, 0], 1.0 + points[:, 0] / reference.W)
     assert values.shape[1] == 1
+
+
+def test_the_couple_conserves_charge(reference):
+    """V3 + 2 e- <-> V2 does not conserve charge, nor V3 + e- <-> SO4."""
+    domain = Domain("cell", "interval")
+    with pytest.raises(ValueError, match="does not conserve charge"):
+        reference.half_cell(domain, electrons=2)
+    with pytest.raises(ValueError, match="needs a reservoir"):
+        RedoxHalfCell(
+            domain,
+            reference.IONS,
+            reference.RESERVOIR,
+            "SO4",
+            "V3",
+            reference.electrode(domain),
+            oxidation_on_discharge=True,
+            rate_constant=2.5e-7,
+            formal_potential=-0.36,
+        )
+
+
+@pytest.mark.parametrize("missing", [(), ("H", "SO4")], ids=["none", "two"])
+def test_the_reservoir_lacks_exactly_one_ion(reference, missing):
+    """One ion, and only one, follows from electroneutrality."""
+    domain = Domain("cell", "interval")
+    reservoir = {**reference.RESERVOIR, "SO4": 100.0}
+    reservoir = {k: v for k, v in reservoir.items() if k not in missing}
+    with pytest.raises(ValueError, match="all ions but one"):
+        RedoxHalfCell(
+            domain,
+            reference.IONS,
+            reservoir,
+            "V2",
+            "V3",
+            reference.electrode(domain),
+            oxidation_on_discharge=True,
+            rate_constant=2.5e-7,
+            formal_potential=-0.36,
+        )

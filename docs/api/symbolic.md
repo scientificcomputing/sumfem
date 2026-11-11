@@ -44,6 +44,8 @@
    :members:
 
 .. autofunction:: as_expr
+
+.. autofunction:: value_at_defaults
 ```
 
 ## Components
