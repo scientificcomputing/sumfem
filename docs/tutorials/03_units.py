@@ -43,7 +43,7 @@
 #   -\frac{\mathrm{d}}{\mathrm{d}x}\left(D_0 e^{-E / (k_B T)}
 #   \frac{\mathrm{d}c}{\mathrm{d}x}\right) &= 0,
 # \end{aligned}
-# $$
+# $$ (wall-equations)
 #
 # with the temperature and the concentration given on both faces. In SI
 # units, the two fields differ by many orders of magnitude.
@@ -236,13 +236,17 @@ for group in groups:
 #   \mathrm{Ar} &= \frac{E}{k_B T_{ref}}, \\
 #   D &= D_0 e^{-\mathrm{Ar}\, T_{ref} / T},
 # \end{aligned}
+# $$ (arrhenius-number)
+#
+# so at a temperature $c\, T_{ref}$ it is
+#
+# $$
+#   D = D_0 e^{-\mathrm{Ar} / c},
 # $$
 #
-# so at a temperature $T = c\, T_{ref}$ it is
-# $D = D_0 e^{-\mathrm{Ar} / c}$: a factor $c$ in the temperature divides
-# the exponent by $c$, and with $\mathrm{Ar}$ of one or more the diffusivity
-# changes strongly with the temperature. Here, at the reference temperature
-# and at the cold face:
+# so a factor $c$ in the temperature divides the exponent by $c$, and with
+# $\mathrm{Ar}$ of one or more the diffusivity changes strongly with the
+# temperature. Here, at the reference temperature and at the cold face:
 
 # +
 # The Arrhenius number is the group with the activation energy
@@ -262,7 +266,7 @@ for label, temperature in (("T_ref", T.scale), ("the cold face", 300.0)):
 # uses the dimensions of the quantities, not the equations, so it finds
 # groups of both kinds. Two of the groups here are of the second kind,
 # $D_0 k_B / (L^3 \kappa)$ and $L^3 c_{ref}$: the steady hydrogen equation,
-# $\nabla \cdot (D \nabla c) = 0$, is linear in the concentration, so the
+# the second of {eq}`wall-equations`, is linear in the concentration, so the
 # scale of the concentration divides out of it, and so does $D_0$.
 #
 # ## Scaling the equations

@@ -53,6 +53,7 @@ from sumfem.post_processing import error
 # {py:meth}`functional <sumfem.symbolic.Functional.functional>`:
 
 
+# +
 class DirichletEnergy(symbolic.Functional):
     """``int 1/2 |grad(u)|^2 - f u dx``."""
 
@@ -66,11 +67,14 @@ class DirichletEnergy(symbolic.Functional):
         return energy * u.domain.dx()
 
 
+# -
+
 # {py:meth}`to_residual <sumfem.symbolic.Functional.to_residual>` derives the
 # residual, the derivative of the energy in the direction of the test function
 # of the field, which is solved like any other:
 
-domain = symbolic.Domain("square", "triangle")
+cell_name = "triangle"
+domain = symbolic.Domain("square", cell_name)
 u = symbolic.Field("u", domain, ("Lagrange", 2))
 energy = DirichletEnergy("energy", u, -6.0)
 residual = energy.to_residual()
@@ -83,7 +87,9 @@ def exact(x):
     return 1 + x[0] ** 2 + 2 * x[1] ** 2
 
 
-square = dolfinx.mesh.create_unit_square(MPI.COMM_WORLD, 16, 16)
+square = dolfinx.mesh.create_unit_square(
+    MPI.COMM_WORLD, 16, 16, cell_type=dolfinx.mesh.to_type(cell_name)
+)
 marked = discrete.MeshData.from_locators(
     square, {1: {"Boundary": lambda x: np.full(x.shape[1], True)}}, boundary=True
 )

@@ -58,10 +58,19 @@ from sumfem.post_processing import error
 
 # ## A Dirichlet condition
 #
-# The method goes back to Babuška {cite}`Babuska1973`: a Dirichlet condition
-# $u = g$ on a part $\Gamma$ of the boundary is imposed at the stationary
-# point of $(\lambda, u - g)$ on $\Gamma$, with a multiplier $\lambda$ that
-# lives on $\Gamma$ alone. For Poisson's equation $-\Delta u = f$, this adds
+# The method goes back to Babuška {cite}`Babuska1973`. For Poisson's
+# equation with a Dirichlet condition on a part $\Gamma$ of the boundary,
+#
+# $$
+# \begin{aligned}
+#   -\Delta u &= f \quad \text{in } \Omega, \\
+#   u &= g \quad \text{on } \Gamma,
+# \end{aligned}
+# $$ (poisson-dirichlet)
+#
+# the condition is imposed at the stationary point of $(\lambda, u - g)$ on
+# $\Gamma$, with a multiplier $\lambda$ that lives on $\Gamma$ alone. This
+# adds
 #
 # $$
 #   (\lambda, v) + (u - g, \mu)
@@ -69,22 +78,36 @@ from sumfem.post_processing import error
 #
 # on $\Gamma$ to the weak form, with $v$ and $\mu$ the test functions of $u$
 # and $\lambda$. Integrating $(\nabla u, \nabla v)$ by parts shows that the
-# multiplier is the flux leaving the domain, $\lambda = -\nabla u \cdot n$
-# {cite}`Babuska1973,GunzburgerHou1992`, computed with the solution and no
-# post-processing.
+# multiplier is the flux leaving the domain
+# {cite}`Babuska1973,GunzburgerHou1992`,
+#
+# $$
+#   \lambda = -\nabla u \cdot n,
+# $$ (dirichlet-multiplier)
+#
+# computed with the solution and no post-processing.
 #
 # As in the
 # [mortar demo of dolfinx_mpc](https://github.com/jorgensd/dolfinx_mpc/blob/18a40cbcee4761d5136a57d917e3dae2399ccf05/python/demos/demo_mortar.py),
-# we take the unit square, the left edge
-# as $\Gamma$, and the exact solution $u = (x - 1)^2 \cos(2 \pi y)$, whose
-# normal derivative vanishes on the other edges, so that their natural
-# condition holds. On $\Gamma$, $n = (-1, 0)$ and $\lambda = -2 \cos(2 \pi
-# y)$. The multiplier is a field on a
+# we take the unit square, the left edge as $\Gamma$, and the exact
+# solution and multiplier
+#
+# $$
+# \begin{aligned}
+#   u &= (x - 1)^2 \cos(2 \pi y), \\
+#   \lambda &= -2 \cos(2 \pi y) \quad \text{on } \Gamma,
+# \end{aligned}
+# $$ (poisson-exact)
+#
+# by {eq}`dirichlet-multiplier` with the normal $n = (-1, 0)$ of $\Gamma$.
+# The normal derivative of $u$ vanishes on the other edges, so that their
+# natural condition holds. The multiplier is a field on a
 # {py:class}`Subdomain <sumfem.symbolic.Subdomain>` of the facets of
 # $\Gamma$:
 
 # +
-plane = symbolic.Domain("plane", "triangle")
+cell_name = "triangle"
+plane = symbolic.Domain("plane", cell_name)
 left = symbolic.Subdomain("left", plane, 1, "Left")
 u = symbolic.Field("u", plane, ("Lagrange", 1))
 outflow = symbolic.Field("outflow", left, ("Lagrange", 1))
@@ -112,7 +135,11 @@ model = Poisson("poisson", u, source) + DirichletMultiplier(
 previous = None
 for n in (8, 16, 32):
     unit_square = dolfinx.mesh.create_unit_square(
-        MPI.COMM_WORLD, n, n, diagonal=dolfinx.mesh.DiagonalType.crossed
+        MPI.COMM_WORLD,
+        n,
+        n,
+        cell_type=dolfinx.mesh.to_type(cell_name),
+        diagonal=dolfinx.mesh.DiagonalType.crossed,
     )
     marked = discrete.MeshData.from_locators(
         unit_square, {1: {"Left": lambda x: np.isclose(x[0], 0.0)}}
@@ -169,27 +196,43 @@ assert errors[0] < 1e-3 and errors[1] < 0.1
 # which is nonlinear in the displacement: as in contact at large strains,
 # the gap follows the deformed boundary {cite}`Chouly2023` (Section 11.1.2).
 #
-# We fit an elastic disc of radius $r_0 = 1$ into a ring of radius
-# $R = 0.9$, a shrink fit, so its whole rim stays in contact. The contact
-# zone is then known in advance, a bilateral contact, and nonpenetration,
-# $g(u) \le 0$, holds with equality, $g(u) = 0$ {cite}`Chouly2023`
-# (Section 1.3.1). When the contact zone is not known, unilateral contact,
+# We fit an elastic disc of radius $r_0$ into a ring of a smaller radius
+# $R$, a shrink fit, so its whole rim stays in contact. The contact zone is
+# then known in advance, a bilateral contact, and the inequality of
+# nonpenetration holds with equality {cite}`Chouly2023` (Section 1.3.1),
+#
+# $$
+#   g(u) = 0 \quad \text{on the rim}.
+# $$ (bilateral-contact)
+#
+# When the contact zone is not known, unilateral contact,
 # the inequality needs a nonsmooth reformulation, such as Nitsche's method
 # or an augmented Lagrangian {cite}`Chouly2023` (Chapters 6 and 7), which a
 # {py:class}`~sumfem.models.BoundaryConstraint` does not provide.
 #
 # The constraint is imposed at the stationary point of $(p, g(u))$ on the
 # rim, so the multiplier $p$ enters the equation of $u$ through the
-# derivative of the gap, $g'(u; v) = n \cdot v$ with the current normal
-# $n = (X + u)/|X + u|$. The boundary term of elasticity is
-# $(\sigma(u) n, v)$, so the multiplier is minus the normal stress,
-# $p = -\sigma_n \ge 0$, the contact pressure. Note that
-# {cite}`Chouly2023` (Sections 1.3.2 and 7.1) takes the multiplier as
-# $\sigma_n \le 0$ instead.
+# derivative of the gap,
+#
+# $$
+#   g'(u; v) = n \cdot v, \quad n = \frac{X + u}{|X + u|},
+# $$ (gap-derivative)
+#
+# with the current normal $n$. The boundary term of elasticity is
+# $(\sigma(u) n, v)$, so the multiplier is minus the normal stress, the
+# contact pressure,
+#
+# $$
+#   p = -\sigma_n \ge 0.
+# $$ (contact-pressure)
+#
+# Note that {cite}`Chouly2023` (Sections 1.3.2 and 7.1) takes the
+# multiplier as the normal stress itself, which is not positive.
 #
 # The body is linearly elastic, with the Lamé parameters $\mu$ and $\lambda_L$:
 
 
+# +
 class Elasticity(symbolic.Residual):
     """``(sigma(u), grad(v))`` with ``sigma = 2 mu eps + lambda_L tr(eps) I``."""
 
@@ -204,14 +247,25 @@ class Elasticity(symbolic.Residual):
         return ufl.inner(sigma, ufl.grad(u.v)) * u.domain.dx()
 
 
-# Without friction or other loads, the disc contracts uniformly, $u = \alpha
-# X$ with $\alpha = R / r_0 - 1$, and the contact pressure is uniform,
-# $p = -2(\mu + \lambda_L)\alpha$. The rim is a polygon on a mesh, so the
+# -
+
+# Without friction or other loads, the disc contracts uniformly, and the
+# contact pressure is uniform,
+#
+# $$
+# \begin{aligned}
+#   u &= \alpha X, \quad \alpha = \frac{R}{r_0} - 1, \\
+#   p &= -2 (\mu + \lambda_L) \alpha.
+# \end{aligned}
+# $$ (shrink-fit-exact)
+#
+# The rim is a polygon on a mesh, so the
 # discrete solution converges to it as the mesh is refined. The disc is
 # meshed with Gmsh, its rim marked `"Rim"`, and the multiplier lives on the
 # rim, a {py:class}`Subdomain <sumfem.symbolic.Subdomain>` of its facets:
 
 
+# +
 def disc_mesh(size: float) -> discrete.MeshData:
     """The unit disc, with its cells marked "Disc" and its rim "Rim"."""
     gmsh.initialize()
@@ -229,6 +283,11 @@ def disc_mesh(size: float) -> discrete.MeshData:
     gmsh.finalize()
     return discrete.MeshData.from_gmsh(data)
 
+
+# -
+
+# The model: the elasticity of the disc, and the contact condition on its
+# rim, with the gap to the ring:
 
 # +
 mu, lmbda, R = 1.0, 2.0, 0.9
@@ -312,13 +371,21 @@ if MPI.COMM_WORLD.rank == 0:
 #
 # Across an interface between two materials, hydrogen's concentration jumps,
 # while its partial pressure $P$ is continuous {cite}`DelaporteMathurin2021`.
-# In a metal, the concentration follows Sieverts' law, $c = K_S \sqrt{P}$,
-# and in e.g. a liquid metal Henry's law, $c = K_H P$, so at an interface
-# between the two {cite}`FESTIMTheory`,
+# In a metal, the concentration follows Sieverts' law, and in e.g. a liquid
+# metal Henry's law,
+#
+# $$
+# \begin{aligned}
+#   c &= K_S \sqrt{P} \quad \text{(Sieverts)}, \\
+#   c &= K_H P \quad \text{(Henry)},
+# \end{aligned}
+# $$ (sieverts-henry)
+#
+# so at an interface between the two {cite}`FESTIMTheory`,
 #
 # $$
 #   \left(\frac{c_0}{K_S}\right)^2 = \frac{c_1}{K_H},
-# $$
+# $$ (pressure-continuity)
 #
 # a nonlinear condition between the concentrations $c_0$ of the metal and
 # $c_1$ of the liquid.
@@ -355,7 +422,10 @@ if MPI.COMM_WORLD.rank == 0:
 
 # +
 eps = 1e-10
-square = dolfinx.mesh.create_unit_square(MPI.COMM_WORLD, 8, 8)
+cell_name = "triangle"
+square = dolfinx.mesh.create_unit_square(
+    MPI.COMM_WORLD, 8, 8, cell_type=dolfinx.mesh.to_type(cell_name)
+)
 halves = discrete.MeshData.from_locators(
     square,
     {
@@ -370,7 +440,7 @@ halves = discrete.MeshData.from_locators(
         },
     },
 )
-cell = symbolic.Domain("cell", "triangle")
+cell = symbolic.Domain("cell", cell_name)
 metal = symbolic.Subdomain("metal", cell, 2, "Metal")
 liquid = symbolic.Subdomain("liquid", cell, 2, "Liquid")
 interface = symbolic.Subdomain("interface", cell, 1, "Interface")
@@ -403,11 +473,19 @@ solver = solvers.Solver(disc[model], bcs)
 solver.solve()
 # -
 
-# The profiles are linear, with slopes $s_0$ in the metal and $s_1 = D_0 s_0
-# / D_1$ in the liquid, the flux being continuous, and the concentration
-# $y = a + s_0 / 2$ of the metal at the interface solves the quadratic
-# $y^2 / K_S^2 + r y / K_H - (b + r a) / K_H = 0$, $r = D_0 / D_1$. P1
-# elements are exact for linear profiles, so the solution matches it to
+# The profiles are linear, with the slope $s_0$ in the metal and $s_1$ in
+# the liquid, the flux being continuous. The concentration $y$ of the metal
+# at the interface solves a quadratic, from {eq}`pressure-continuity`:
+#
+# $$
+# \begin{aligned}
+#   s_1 &= \frac{D_0}{D_1} s_0, \quad y = a + \frac{s_0}{2}, \\
+#   0 &= \frac{y^2}{K_S^2} + \frac{r y}{K_H} - \frac{b + r a}{K_H},
+#   \quad r = \frac{D_0}{D_1}.
+# \end{aligned}
+# $$ (interface-exact)
+#
+# P1 elements are exact for linear profiles, so the solution matches it to
 # round-off, and the multiplier is the flux $-D_0 s_0$:
 
 # +
