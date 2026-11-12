@@ -31,16 +31,18 @@ from sumfem.symbolic import (
     Residual,
     ResidualSum,
 )
+from sumfem.symbolic.si import CONCENTRATION
 
 from .charge import ElectrolyteConduction
 from .couple import RedoxCouple
-from .electrolyte import CONCENTRATION, Electrolyte, Ion
+from .electrode import PorousElectrode
+from .electrolyte import Electrolyte, Ion
 from .kinetics import (
     ButlerVolmer,
     MassTransferButlerVolmer,
     PistonVelocityButlerVolmer,
 )
-from .porous import PorousElectrode, Region
+from .porous import Region
 from .transport import TransientNernstPlanck
 
 __all__ = ["RedoxHalfCell"]
@@ -733,6 +735,43 @@ class RedoxHalfCell:
             DirichletBC(c, markers, self._inlet[ion])
             for ion, c in self._concentrations.items()
         ]
+
+    def reservoir_concentration(self, ion: str) -> float:
+        """The reservoir concentration of a transported ion, as given.
+
+        Args:
+            ion: The name of the ion.
+
+        Returns:
+            The default of its parameter ``"<name>.c0_<ion>"``, in mol/m^3.
+        """
+        default = self._inlet[ion].default_si
+        assert default is not None
+        return float(default)
+
+    def equilibrium_potential(self, discretization: Discretization) -> float:
+        """Nernst's potential of the couple at its reservoir concentrations.
+
+        That is ``E0 + R T / (n F) ln(c_ox / c_red)``, see
+        :meth:`~sumfem.electrochemistry.ButlerVolmer.equilibrium_potential`,
+        with the reservoir concentrations as given,
+        :meth:`reservoir_concentration`.
+
+        Args:
+            discretization: The discretization, for the values of the
+                formal potential and the constants.
+
+        Returns:
+            The potential in V.
+        """
+        value, couple, e = discretization.value, self._couple, self._electrolyte
+        # The half-cell's electrolyte has the temperature as a parameter
+        assert isinstance(e.T, Parameter)
+        thermal = value(e.R) * value(e.T) / (couple.electrons * value(e.F))
+        ratio = self.reservoir_concentration(
+            couple.oxidized
+        ) / self.reservoir_concentration(couple.reduced)
+        return float(value(self._formal_potential) + thermal * np.log(ratio))
 
     def initialize(self, discretization: Discretization) -> None:
         """Set a state at rest, as RFBniCS starts.

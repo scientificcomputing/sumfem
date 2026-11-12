@@ -18,7 +18,8 @@ r"""Models of electrochemistry, built on :mod:`sumfem.models`.
 - Full cells: :class:`FullCell`, two half-cells, each a
   :class:`HalfCellSpec`, and a membrane between them, a
   :class:`MembraneSpec`, with the flow of the electrolytes from their
-  tanks, a :class:`FlowSpec`.
+  tanks, a :class:`FlowSpec`, by any :class:`ElectrodeFlow`, e.g.
+  :class:`DarcyFlow`.
 
 The package imports from the core of :mod:`sumfem`, and never the other
 way around.
@@ -26,8 +27,9 @@ way around.
 
 from .charge import ElectrolyteConduction
 from .couple import RedoxCouple
+from .electrode import DarcyFlow, ElectrodeFlow, FlowSetup, PorousElectrode
 from .electrolyte import Electrolyte, Ion
-from .full_cell import FlowSpec, FullCell, HalfCellSpec, MembraneSpec
+from .full_cell import FullCell
 from .half_cell import RedoxHalfCell
 from .kinetics import (
     ButlerVolmer,
@@ -37,7 +39,8 @@ from .kinetics import (
     PistonVelocityButlerVolmer,
 )
 from .membrane import MembraneProtonFlux, ProtonExchangeMembrane, SchloeglFlow
-from .porous import PorousElectrode, Region
+from .porous import Region
+from .specs import FlowSpec, HalfCellSpec, MembraneSpec
 from .transport import NernstPlanck, TransientNernstPlanck
 
 __all__ = [
@@ -57,6 +60,9 @@ __all__ = [
     "HalfCellSpec",
     "MembraneSpec",
     "FlowSpec",
+    "ElectrodeFlow",
+    "DarcyFlow",
+    "FlowSetup",
     "ButlerVolmer",
     "ElectrodeReaction",
     "ExchangeCurrentButlerVolmer",

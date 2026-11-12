@@ -14,10 +14,19 @@
    :members:
 ```
 
-## Porous electrodes
+## Porous electrodes and their flow
 
 ```{eval-rst}
 .. autoclass:: PorousElectrode
+   :members:
+
+.. autoclass:: ElectrodeFlow
+   :members:
+
+.. autoclass:: DarcyFlow
+   :members:
+
+.. autoclass:: FlowSetup
    :members:
 
 .. autoclass:: Region
@@ -93,4 +102,5 @@
 
 .. autoclass:: FlowSpec
    :members:
+   :exclude-members: model
 ```

@@ -18,15 +18,9 @@ from sumfem.symbolic import (
     Parameter,
     expression_or_parameter,
 )
-from sumfem.symbolic.si import to_si
+from sumfem.symbolic.si import CONCENTRATION, DIFFUSIVITY, to_si
 
 __all__ = ["Electrolyte", "Ion"]
-
-CONCENTRATION = syu.mol / syu.m**3
-"""Unit of concentrations."""
-
-DIFFUSIVITY = syu.m**2 / syu.second
-"""Unit of diffusion coefficients."""
 
 
 @dataclasses.dataclass(frozen=True)

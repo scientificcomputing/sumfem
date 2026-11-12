@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import typing
 
-import numpy.typing as npt
-import sympy
 import sympy.physics.units as syu
 import ufl
 
@@ -14,29 +12,19 @@ from sumfem.models.operators import restricted
 from sumfem.symbolic import (
     DirichletBC,
     Domain,
+    ExpressionOrDefault,
+    ExpressionOrValue,
     Field,
     Residual,
     ResidualSum,
     as_expr,
     expression_or_parameter,
 )
+from sumfem.symbolic.si import CONCENTRATION, DIFFUSIVITY, PERMEABILITY, VISCOSITY
 
-from .electrolyte import CONCENTRATION, DIFFUSIVITY, Electrolyte
+from .electrolyte import Electrolyte
 
 __all__ = ["MembraneProtonFlux", "ProtonExchangeMembrane", "SchloeglFlow"]
-
-INPUT: typing.TypeAlias = ufl.core.expr.Expr | npt.ArrayLike | None
-"""A model input: an expression, a value, or ``None`` for a parameter."""
-
-PROPERTY: typing.TypeAlias = ufl.core.expr.Expr | float | sympy.Expr | None
-"""A property of the membrane: an expression, used as given, or the default
-of the parameter the membrane creates, ``None`` for none."""
-
-PERMEABILITY = syu.m**2
-"""Unit of permeabilities."""
-
-VISCOSITY = syu.pascal * syu.second
-"""Unit of dynamic viscosities."""
 
 
 class SchloeglFlow(Residual):
@@ -109,10 +97,10 @@ class SchloeglFlow(Residual):
         name: str,
         pressure: Field,
         potential: ufl.core.expr.Expr,
-        charge_density: INPUT = None,
-        electrokinetic_permeability: INPUT = None,
-        hydraulic_permeability: INPUT = None,
-        viscosity: INPUT = None,
+        charge_density: ExpressionOrValue = None,
+        electrokinetic_permeability: ExpressionOrValue = None,
+        hydraulic_permeability: ExpressionOrValue = None,
+        viscosity: ExpressionOrValue = None,
         markers: tuple[str, ...] = (),
     ):
         super().__init__(name)
@@ -266,12 +254,12 @@ class ProtonExchangeMembrane(ResidualSum):
         markers: tuple[str, ...],
         water: Field | None = None,
         pressure: Field | None = None,
-        fixed_charge: PROPERTY = None,
-        proton_diffusivity: PROPERTY = None,
-        water_diffusivity: PROPERTY = None,
-        electrokinetic_permeability: PROPERTY = None,
-        hydraulic_permeability: PROPERTY = None,
-        viscosity: PROPERTY = None,
+        fixed_charge: ExpressionOrDefault = None,
+        proton_diffusivity: ExpressionOrDefault = None,
+        water_diffusivity: ExpressionOrDefault = None,
+        electrokinetic_permeability: ExpressionOrDefault = None,
+        hydraulic_permeability: ExpressionOrDefault = None,
+        viscosity: ExpressionOrDefault = None,
         temperature: ufl.core.expr.Expr | float = 298.15,
     ):
         domain = potential.domain
