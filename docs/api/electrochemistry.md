@@ -56,6 +56,16 @@
    :members:
 ```
 
+## Membranes
+
+```{eval-rst}
+.. autoclass:: ProtonExchangeMembrane
+   :members:
+
+.. autoclass:: SchloeglFlow
+   :members:
+```
+
 ## Half-cells
 
 ```{eval-rst}

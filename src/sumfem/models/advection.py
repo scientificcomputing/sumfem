@@ -11,7 +11,7 @@ __all__ = ["Advection", "ConservativeAdvection", "ConvectiveAdvection"]
 
 
 class Advection(Residual):
-    r"""Advection of a field by a velocity, in a form of a subclass.
+    r"""Advection of a field by a velocity
 
     The velocity is any expression, e.g. a field solved by a flow model or
     data transferred from another mesh. The advected quantity is the field,
