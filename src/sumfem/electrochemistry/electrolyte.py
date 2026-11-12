@@ -61,29 +61,76 @@ class Ion:
 
 
 class Electrolyte:
-    """A dilute electrolyte solution: its ions, temperature and constants.
+    r"""A dilute electrolyte solution: its ions, temperature and constants.
 
-    The electrolyte creates its parameters, such as the temperature
-    ``"<name>.T"``, named ``"<name>.<parameter>"``: the constants, the
-    temperature and the properties of the solution, see its properties, and
-    the diffusivity of each ion, see :meth:`diffusivity`. Models that share
-    an electrolyte share these parameters.
+    An electrolyte is a solution of ions in a solvent, e.g. vanadium ions,
+    protons and sulfate in water. In a dilute solution the ions do not
+    interact with each other: each ion :math:`k`, of charge number
+    :math:`z_k`, concentration :math:`c_k` and diffusivity :math:`D_k`,
+    moves by diffusion, by migration in the electric field and with the
+    solvent, with the Nernst-Planck flux :math:`\mathbf{N}_k` of
+    :eq:`nernst-planck-flux`. The solution is electroneutral:
+
+    .. math::
+       :label: electroneutrality
+
+       \begin{aligned}
+         \sum_k z_k c_k &= 0.
+       \end{aligned}
+
+    The state of the solution is the concentrations of its ions and the
+    temperature :math:`T`. Its properties are the diffusivities of the ions
+    and the density and viscosity of the solution.
+
+    The electrolyte gives the quantities of dilute-solution theory that the
+    models of a solution share. These are the concentration of each ion,
+    :meth:`concentration`, and the charge the ions carry, the current
+    density :meth:`current_density`:
+
+    .. math::
+       :label: electrolyte-current
+
+       \begin{aligned}
+         \mathbf{i}_l &= F \sum_k z_k \mathbf{N}_k, \\
+         \mathbf{i}_l &= -\kappa \nabla \phi
+           - F \sum_k z_k t D_k \nabla c_k, \\
+         \kappa &= \frac{F^2}{R T} \sum_k z_k^2 t D_k c_k,
+       \end{aligned}
+
+    with the electrolyte potential :math:`\phi`, the ionic
+    :meth:`conductivity` :math:`\kappa`, the current of diffusion,
+    :meth:`diffusion_current`, and a correction :math:`t` of every
+    diffusivity, e.g. Bruggeman's in a porous electrode. Advection carries
+    no charge, by :eq:`electroneutrality`. The transport, conduction and
+    reaction models, e.g. :class:`~sumfem.electrochemistry.NernstPlanck`,
+    :class:`~sumfem.electrochemistry.ElectrolyteConduction` and
+    :class:`~sumfem.electrochemistry.ButlerVolmer`, build their terms from
+    one electrolyte, so they agree on these quantities.
 
     At most one ion may have no field. Its concentration follows from
-    electroneutrality, ``sum_j z_j c_j = 0``, see :attr:`balanced`. Nothing
-    keeps that concentration positive, so choose the most abundant ion of
-    the supporting electrolyte, e.g. sulfate in a vanadium electrolyte,
-    never an ion of a reaction, and check its minimum, e.g. with
+    :eq:`electroneutrality`, see :attr:`balanced`. Nothing keeps that
+    concentration positive, so choose the most abundant ion of the
+    supporting electrolyte, e.g. sulfate in a vanadium electrolyte, never an
+    ion of a reaction, and check its minimum, e.g. with
     :meth:`~sumfem.electrochemistry.RedoxHalfCell.minimum_balanced_concentration`.
     Without ions, the electrolyte has a uniform composition, and only
     provides the constants, the temperature and the properties of the
     solution.
 
+    Its constants, temperature and properties of the solution, and the
+    diffusivity of each ion, see :meth:`diffusivity`, are parameters named
+    ``"<name>.<parameter>"``, e.g. the temperature ``"<name>.T"``. Models
+    that share an electrolyte share these parameters. The temperature,
+    density and viscosity may instead be given as expressions, e.g. fields
+    of a heat equation or of a flow, which couples the models to them.
+
     Args:
         name: Prefix of the parameter names.
         domain: The domain of the parameters.
         ions: The ions.
-        temperature: Default temperature in K.
+        temperature: The temperature: an expression in K, e.g. the field of
+            a heat equation, or the default value of the parameter the
+            electrolyte creates.
         density: Density of the solution: an expression in kg/m^3, e.g. a
             parameter shared with a flow model, or the default value of the
             parameter the electrolyte creates. ``None`` for no default.
@@ -116,7 +163,7 @@ class Electrolyte:
     _R: Parameter
     """The gas constant."""
 
-    _T: Parameter
+    _T: ufl.core.expr.Expr
     """The temperature."""
 
     _floor: Parameter
@@ -133,7 +180,7 @@ class Electrolyte:
         name: str,
         domain: Domain,
         ions: typing.Sequence[Ion] = (),
-        temperature: float = 298.15,
+        temperature: ufl.core.expr.Expr | float = 298.15,
         density: ufl.core.expr.Expr | float | None = None,
         viscosity: ufl.core.expr.Expr | float | None = None,
         concentration_floor: float = 1e-14,
@@ -172,8 +219,16 @@ class Electrolyte:
             unit=syu.joule / (syu.mol * syu.kelvin),
             doc="Universal gas constant",
         )
-        self._T = Parameter(
-            f"{name}.T", domain, default=temperature, unit=syu.kelvin, doc="Temperature"
+        self._T = (
+            temperature
+            if isinstance(temperature, ufl.core.expr.Expr)
+            else Parameter(
+                f"{name}.T",
+                domain,
+                default=temperature,
+                unit=syu.kelvin,
+                doc="Temperature",
+            )
         )
         self._floor = Parameter(
             f"{name}.floor",
@@ -251,8 +306,8 @@ class Electrolyte:
         return self._R
 
     @property
-    def T(self) -> Parameter:
-        """The temperature."""
+    def T(self) -> ufl.core.expr.Expr:
+        """The temperature, the parameter ``"<name>.T"`` unless given."""
         return self._T
 
     @property
@@ -310,11 +365,11 @@ class Electrolyte:
     def conductivity(
         self, correction: ufl.core.expr.Expr | float = 1.0
     ) -> ufl.core.expr.Expr:
-        """Ionic conductivity ``F^2 / (R T) sum_j z_j^2 D_j c_j``.
+        r"""The ionic conductivity :math:`\kappa` of :eq:`electrolyte-current`.
 
         Args:
-            correction: Factor applied to every diffusivity, such as a
-                Bruggeman correction in a porous electrode.
+            correction: The correction :math:`t` of every diffusivity, e.g.
+                Bruggeman's in a porous electrode.
         """
         total = sum(
             s.charge**2 * self.diffusivity(s.name) * self.concentration(s.name)
@@ -325,7 +380,9 @@ class Electrolyte:
     def diffusion_current(
         self, correction: ufl.core.expr.Expr | float = 1.0
     ) -> ufl.core.expr.Expr:
-        """Current carried by diffusion, ``F sum_j z_j D_j grad(c_j)``.
+        r"""The current of diffusion, :math:`F \sum_k z_k t D_k \nabla c_k`.
+
+        It is the current of :eq:`electrolyte-current` without migration.
 
         Args:
             correction: See :meth:`conductivity`.
@@ -341,16 +398,14 @@ class Electrolyte:
         potential: ufl.core.expr.Expr,
         correction: ufl.core.expr.Expr | float = 1.0,
     ) -> ufl.core.expr.Expr:
-        """Current density ``-kappa grad(phi) - F sum_j z_j D_j grad(c_j)``.
+        r"""The current density :math:`\mathbf{i}_l` of :eq:`electrolyte-current`.
 
-        It is the charge the ions carry, ``F sum_j z_j N_j``, with the
-        Nernst-Planck fluxes ``N_j`` of every ion, also the one given by
-        electroneutrality: the conductivity and the migration use the same
-        concentrations, and advection carries no charge, as
-        ``sum_j z_j c_j = 0``.
+        It is the charge the ions carry, with the Nernst-Planck fluxes of
+        every ion, also the one given by :eq:`electroneutrality`, as the
+        conductivity and the migration use the same concentrations.
 
         Args:
-            potential: The electrolyte potential.
+            potential: The electrolyte potential :math:`\phi`.
             correction: See :meth:`conductivity`.
         """
         return -self.conductivity(correction) * ufl.grad(

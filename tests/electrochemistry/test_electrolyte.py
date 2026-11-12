@@ -16,8 +16,8 @@ from sumfem.electrochemistry import (
     Region,
     TransientNernstPlanck,
 )
-from sumfem.models import Accumulation
-from sumfem.symbolic import Domain, Field, build_system
+from sumfem.models import Accumulation, Diffusion
+from sumfem.symbolic import Domain, Field, Parameter, build_system
 
 CONCENTRATION = syu.mol / syu.m**3
 
@@ -228,3 +228,23 @@ def test_the_balanced_ion_needs_a_charge():
     c = Field("c", domain, ("Lagrange", 1))
     with pytest.raises(ValueError, match="has no charge"):
         Electrolyte("e", domain, [Ion("A", 1, 1e-9, c), Ion("N", 0, 1e-9)])
+
+
+def test_the_temperature_can_be_the_field_of_a_heat_equation(domain):
+    """A temperature given as a field replaces the parameter ``"e.T"``, and
+    the electrolyte's models keep consistent units with it."""
+    T = Field("T", domain, ("Lagrange", 1), unit=syu.kelvin, scale=300.0)
+    ions = vanadium(domain)
+    electrolyte = Electrolyte("e", domain, ions, temperature=T)
+    assert electrolyte.T is T
+    _, phi_l = potentials(domain)
+    model = ElectrolyteConduction("charge", phi_l, electrolyte)
+    for ion in ions[:3]:
+        model += NernstPlanck(ion.name, ion, electrolyte, phi_l)
+    conductivity = Parameter(
+        "heat.k", domain, default=0.6, unit=syu.watt / (syu.m * syu.kelvin)
+    )
+    model += Diffusion("heat", T, conductivity)
+    system = build_system(model, check_units=True)
+    assert "e.T" not in system.parameters
+    assert T in system.unknowns
