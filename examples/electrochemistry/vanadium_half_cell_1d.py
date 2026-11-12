@@ -367,7 +367,10 @@ charge = np.array([r[3] for r in records])
 # Charging reduces V³⁺ to V²⁺, so the state of charge grows, and discharging
 # turns it back. At rest only the exchange with the reservoir at the membrane
 # changes the electrode, slowly. The voltage is lower on charge than on
-# discharge, by the overpotentials that drive the reaction either way:
+# discharge, by the overpotentials that drive the reaction either way.
+# Sulfate, which follows from electroneutrality, stays positive, see
+# {py:meth}`minimum_balanced_concentration
+# <sumfem.electrochemistry.RedoxHalfCell.minimum_balanced_concentration>`:
 
 # +
 steps = {mode: np.diff(charge[modes == mode]) for mode in ("charge", "discharge")}
@@ -378,6 +381,7 @@ rest = charge[modes == "rest"]
 assert np.abs(np.diff(rest)).max() < np.abs(steps["charge"]).min()
 assert voltage[modes == "charge"].mean() < voltage[modes == "discharge"].mean()
 assert np.isfinite(voltage).all()
+assert cell.minimum_balanced_concentration(disc) > 0
 # -
 
 # The voltage and the state of charge through the schedule:
