@@ -269,16 +269,13 @@ class RateReaction(Residual):
         if measure is None or measure.integral_type() != "interior_facet":
             return None
         domain = measure.ufl_domain()
-        ids = measure.subdomain_id()
-        if (
-            not isinstance(domain, Domain)
-            or not isinstance(ids, tuple)
-            or len(ids) != 1
-        ):
+        if not isinstance(domain, Domain):
             return None
-        names = {i: name for name, i in domain.markers[domain.tdim - 1].items()}
-        sides = domain.interface_sides(names.get(ids[0], ""))
-        return None if sides is None else (sides[0], sides[1])
+        interfaces = domain.interfaces_of(measure)
+        if len(interfaces) != 1:
+            return None
+        ((first, second, _),) = interfaces
+        return first, second
 
     def _reaction_domain(self, fields: list[Field]) -> Domain:
         """The domain of lowest dimension among the participants'."""

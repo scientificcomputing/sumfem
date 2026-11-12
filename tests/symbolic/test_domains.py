@@ -1,7 +1,7 @@
 import pytest
 import ufl
 
-from sumfem.symbolic import ComponentError, Domain
+from sumfem.symbolic import ComponentError, Domain, Subdomain
 from sumfem.symbolic.domains import MEASURE_ENTITY_TYPE
 
 
@@ -139,3 +139,17 @@ def test_invalid_markers_and_integral_types():
         domain.marker_ids("A", "edge")
     with pytest.raises(TypeError):
         domain.dx(3)
+
+
+def test_an_interface_measure_knows_its_sides():
+    """An interface measure gives its subdomains, ``"+"`` side first, and its
+    marker; other facet measures give none."""
+    square = Domain("square", "triangle")
+    left = Subdomain("left", square, 2, "Left")
+    right = Subdomain("right", square, 2, "Right")
+    measure = square.interface(left, right, "Interface")
+    assert square.interfaces_of(measure) == ((left, right, "Interface"),)
+    assert square.interfaces_of(square.dS("Interface")) == ()
+    assert square.interfaces_of(square.dS()) == ()
+    assert square.interfaces_of(square.ds("Interface")) == ()
+    assert left.interfaces_of(measure) == ()

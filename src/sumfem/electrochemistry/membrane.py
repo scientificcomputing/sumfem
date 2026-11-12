@@ -10,19 +10,20 @@ import sympy.physics.units as syu
 import ufl
 
 from sumfem.models import Accumulation, Conduction, ConservativeAdvection, Diffusion
+from sumfem.models.operators import restricted
 from sumfem.symbolic import (
     DirichletBC,
     Domain,
     Field,
-    Parameter,
     Residual,
     ResidualSum,
     as_expr,
+    expression_or_parameter,
 )
 
 from .electrolyte import CONCENTRATION, DIFFUSIVITY, Electrolyte
 
-__all__ = ["ProtonExchangeMembrane", "SchloeglFlow"]
+__all__ = ["MembraneProtonFlux", "ProtonExchangeMembrane", "SchloeglFlow"]
 
 INPUT: typing.TypeAlias = ufl.core.expr.Expr | npt.ArrayLike | None
 """A model input: an expression, a value, or ``None`` for a parameter."""
@@ -58,8 +59,14 @@ class SchloeglFlow(Residual):
     :math:`k_p`, the viscosity :math:`\mu` of water, and the charge density
     :math:`\rho = F c_\text{H}` of the mobile protons. The residual is
     :math:`-(\mathbf{v}, \nabla q)` on the pressure, as for
-    :class:`~sumfem.models.Darcy` flow, so the normal velocity is continuous
-    across the faces of the membrane with a Darcy flow beside it.
+    :class:`~sumfem.models.Darcy` flow.
+
+    The equation is a bulk equation on the cells of the membrane,
+    ``markers``, and the velocity holds there only: :math:`\rho` is the
+    charge of the membrane's mobile ions, which the fixed charges set. With
+    one pressure over the membrane and the electrodes beside it, each with
+    a flow model of its own, the pressure is continuous across the faces,
+    and so, weakly, is the normal velocity.
 
     Args:
         name: Name of the model.
@@ -183,6 +190,16 @@ class ProtonExchangeMembrane(ResidualSum):
     is continuous across its faces, and so is the flux of water with one
     water field.
 
+    Every equation is a bulk equation on the cells of the membrane,
+    ``markers``, whose thickness the mesh resolves. Its fields may extend
+    beyond them: in a :class:`~sumfem.electrochemistry.FullCell` the
+    potential and the water live on both electrodes and the membrane, and
+    each electrode's models add the equations there. The faces then need no
+    term of their own for these fields: their continuity, and that of their
+    fluxes, is natural. The protons are not a field of the membrane; the
+    faces pass them to the electrodes' own fields with
+    :meth:`proton_flux`, one condition per face.
+
     The membrane is the sum of ``"<name>_conduction"``, a
     :class:`~sumfem.models.Conduction`; with a water field,
     ``"<name>_water_storage"``, an :class:`~sumfem.models.Accumulation`, and
@@ -239,6 +256,9 @@ class ProtonExchangeMembrane(ResidualSum):
     _markers: tuple[str, ...]
     """Cell markers of the membrane."""
 
+    _conduction: Conduction
+    """Ohmic conduction in the membrane."""
+
     def __init__(
         self,
         name: str,
@@ -260,14 +280,14 @@ class ProtonExchangeMembrane(ResidualSum):
         self._markers = tuple(markers)
         self._constants = Electrolyte(name, domain, temperature=temperature)
         e = self._constants
-        self._fixed_charge = _property(
+        self._fixed_charge = expression_or_parameter(
             f"{name}.fixed_charge",
             fixed_charge,
             domain,
             unit=CONCENTRATION,
             doc="Concentration of the fixed charges",
         )
-        proton = _property(
+        proton = expression_or_parameter(
             f"{name}.proton_diffusivity",
             proton_diffusivity,
             domain,
@@ -275,9 +295,10 @@ class ProtonExchangeMembrane(ResidualSum):
             doc="Proton diffusivity in the membrane",
         )
         conductivity = e.F**2 / (e.R * e.T) * proton * self._fixed_charge
-        models: list[Residual] = [
-            Conduction(f"{name}_conduction", potential, conductivity, self._markers)
-        ]
+        self._conduction = Conduction(
+            f"{name}_conduction", potential, conductivity, self._markers
+        )
+        models: list[Residual] = [self._conduction]
         self._flow = None
         if pressure is not None:
             self._flow = SchloeglFlow(
@@ -285,21 +306,21 @@ class ProtonExchangeMembrane(ResidualSum):
                 pressure,
                 potential,
                 charge_density=e.F * self._fixed_charge,
-                electrokinetic_permeability=_property(
+                electrokinetic_permeability=expression_or_parameter(
                     f"{name}.electrokinetic_permeability",
                     electrokinetic_permeability,
                     domain,
                     unit=PERMEABILITY,
                     doc="Electrokinetic permeability",
                 ),
-                hydraulic_permeability=_property(
+                hydraulic_permeability=expression_or_parameter(
                     f"{name}.hydraulic_permeability",
                     hydraulic_permeability,
                     domain,
                     unit=PERMEABILITY,
                     doc="Hydraulic permeability",
                 ),
-                viscosity=_property(
+                viscosity=expression_or_parameter(
                     f"{name}.viscosity",
                     viscosity,
                     domain,
@@ -310,7 +331,7 @@ class ProtonExchangeMembrane(ResidualSum):
             )
             models.append(self._flow)
         if water is not None:
-            diffusivity = _property(
+            diffusivity = expression_or_parameter(
                 f"{name}.water_diffusivity",
                 water_diffusivity,
                 domain,
@@ -345,8 +366,49 @@ class ProtonExchangeMembrane(ResidualSum):
         return self._fixed_charge
 
     @property
+    def markers(self) -> tuple[str, ...]:
+        """Cell markers of the membrane."""
+        return self._markers
+
+    @property
+    def constants(self) -> Electrolyte:
+        """Faraday's constant, the gas constant and the temperature."""
+        return self._constants
+
+    def current_density(self) -> ufl.core.expr.Expr:
+        r"""The current density :math:`-\kappa_m \nabla \phi` of the membrane."""
+        return self._conduction.flux()
+
+    def proton_flux(
+        self,
+        name: str,
+        protons: Field,
+        measure: ufl.Measure,
+        charge: float = 1.0,
+    ) -> MembraneProtonFlux:
+        """The membrane current carried by the protons of an electrode.
+
+        See :class:`MembraneProtonFlux`.
+
+        Args:
+            name: Name of the model.
+            protons: The proton concentration of the electrode.
+            measure: The interface measure of the face, with the electrode on
+                its ``"+"`` side and the membrane on its ``"-"`` side, from
+                :meth:`~sumfem.symbolic.domains.Domain.interface`.
+            charge: The charge number of the protons.
+
+        Returns:
+            The proton flux at the face.
+        """
+        return MembraneProtonFlux(name, protons, self, measure, charge)
+
+    @property
     def velocity(self) -> ufl.core.expr.Expr:
-        """The velocity of the water, zero without a pressure."""
+        """The velocity of the water in the membrane, zero without a pressure.
+
+        It holds on the membrane's cells only, see :class:`SchloeglFlow`.
+        """
         if self._flow is None:
             return ufl.zero(self._potential.domain.geometric_dimension)
         return self._flow.velocity
@@ -370,28 +432,118 @@ class ProtonExchangeMembrane(ResidualSum):
         return [DirichletBC(c, faces, self._fixed_charge) for c in protons]
 
 
-def _property(
-    name: str,
-    value: PROPERTY,
-    domain: Domain,
-    *,
-    unit: syu.Quantity | sympy.Expr,
-    doc: str,
-) -> ufl.core.expr.Expr:
-    """A property of the membrane: an expression, or a new parameter.
+class MembraneProtonFlux(Residual):
+    r"""The protons of an electrode carry the current of a membrane beside it.
+
+    A cation-exchange membrane passes protons only, so at the face between
+    an electrode and the membrane the protons of the electrode carry the
+    whole current :math:`\mathbf{i}_m` of the membrane,
+
+    .. math::
+       :label: membrane-proton-flux
+
+       \begin{aligned}
+         \mathbf{N}_\text{H} \cdot \mathbf{n}
+           &= \frac{\mathbf{i}_m \cdot \mathbf{n}}{z_\text{H} F},
+       \end{aligned}
+
+    with the normal :math:`\mathbf{n}` out of the electrode, and every other
+    ion has no flux. The residual is
+    :math:`(\mathbf{N}_\text{H} \cdot \mathbf{n}, w)` on the face, with the
+    test function :math:`w` of the protons. The current is that of the
+    membrane's side of the face, :meth:`ProtonExchangeMembrane.current_density`.
+
+    With the ion of the electrolyte that follows from electroneutrality, e.g.
+    sulfate, the zero flux of that ion is no natural condition: it holds
+    when the protons carry the current, by this condition. The proton
+    concentration at the face is not held at the fixed charge, so the model
+    has no Donnan potential across the face.
+
+    The condition is a surface term of the electrode's proton equation, on
+    one face of the membrane and from one side, the electrode's: each face
+    needs its own, with the protons of the electrode on that face. It is
+    not an equation of the membrane, which has no proton field.
 
     Args:
-        name: The full name of the parameter, ``"<membrane>.<property>"``.
-        value: An expression, e.g. a shared parameter, used as given, or the
-            default value of the new parameter, in SI units or with units;
-            ``None`` for a parameter without a default.
-        domain: The domain of the parameter.
-        unit: The unit of the parameter.
-        doc: A description of the parameter.
+        name: Name of the model.
+        protons: The proton concentration :math:`c_\text{H}` of the
+            electrode.
+        membrane: The membrane.
+        measure: The interface measure of the face, with the electrode on
+            its ``"+"`` side and the membrane on its ``"-"`` side, from
+            :meth:`~sumfem.symbolic.domains.Domain.interface`.
+        charge: The charge number :math:`z_\text{H}` of the protons.
 
-    Returns:
-        The expression or the parameter.
+    Raises:
+        ValueError: If the measure is not that of an interface with the
+            membrane on its ``"-"`` side and the protons' subdomain on its
+            ``"+"`` side.
     """
-    if isinstance(value, ufl.core.expr.Expr):
-        return value
-    return Parameter(name, domain, default=value, unit=unit, doc=doc)
+
+    _protons: Field
+    """The proton concentration of the electrode."""
+
+    _membrane: ProtonExchangeMembrane
+    """The membrane."""
+
+    _measure: ufl.Measure
+    """The interface measure of the face."""
+
+    _charge: float
+    """The charge number of the protons."""
+
+    def __init__(
+        self,
+        name: str,
+        protons: Field,
+        membrane: ProtonExchangeMembrane,
+        measure: ufl.Measure,
+        charge: float = 1.0,
+    ):
+        super().__init__(name)
+        self._protons = protons
+        self._membrane = membrane
+        self._measure = measure
+        self._charge = charge
+        self._check_sides()
+
+    def _check_sides(self) -> None:
+        """Check that the face has the protons' electrode on its ``"+"`` side
+        and the membrane on its ``"-"`` side.
+
+        Raises:
+            ValueError: If the measure is not that of such faces.
+        """
+        domain = self._measure.ufl_domain()
+        interfaces = (
+            domain.interfaces_of(self._measure) if isinstance(domain, Domain) else ()
+        )
+        if not interfaces:
+            raise ValueError(
+                f"{self.name!r} needs the measure of a face of the membrane, from "
+                "Domain.interface, to know its sides."
+            )
+        electrode = self._protons.domain
+        for first, second, marker in interfaces:
+            if second.marker not in self._membrane.markers:
+                raise ValueError(
+                    f"The face {marker!r} of {self.name!r} must have the membrane "
+                    f"on its '-' side, got {second.marker!r}."
+                )
+            if electrode is not first:
+                raise ValueError(
+                    f"The face {marker!r} of {self.name!r} must have the electrode "
+                    f"of {self._protons.name!r} on its '+' side, got "
+                    f"{first.marker!r}."
+                )
+
+    def flux(self) -> ufl.core.expr.Expr:
+        r"""The proton flux :math:`\mathbf{N}_\text{H} \cdot \mathbf{n}` out of
+        the electrode, on its side of the face."""
+        n = ufl.FacetNormal(self._measure.ufl_domain())
+        current = restricted(self._membrane.current_density(), "-")
+        F = restricted(self._membrane.constants.F, "+")
+        return ufl.dot(current, n("+")) / (self._charge * F)
+
+    def residual(self) -> ufl.Form:
+        return self.flux() * self._protons.v("+") * self._measure

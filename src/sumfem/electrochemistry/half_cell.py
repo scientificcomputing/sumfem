@@ -718,6 +718,11 @@ class RedoxHalfCell:
         return self._current
 
     @property
+    def formal_potential(self) -> Parameter:
+        """Formal potential of the couple."""
+        return self._formal_potential
+
+    @property
     def area_ratio(self) -> Parameter:
         """Ratio of the membrane area to the current collector area."""
         return self._area_ratio

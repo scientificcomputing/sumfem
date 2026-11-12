@@ -64,6 +64,9 @@
 
 .. autoclass:: SchloeglFlow
    :members:
+
+.. autoclass:: MembraneProtonFlux
+   :members:
 ```
 
 ## Half-cells
@@ -73,5 +76,18 @@
    :members:
 
 .. autoclass:: RedoxHalfCell
+   :members:
+```
+
+## Full cells
+
+```{eval-rst}
+.. autoclass:: FullCell
+   :members:
+
+.. autoclass:: HalfCellSpec
+   :members:
+
+.. autoclass:: MembraneSpec
    :members:
 ```

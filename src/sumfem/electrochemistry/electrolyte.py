@@ -10,7 +10,14 @@ import sympy
 import sympy.physics.units as syu
 import ufl
 
-from sumfem.symbolic import FARADAY, GAS_CONSTANT, Domain, Field, Parameter
+from sumfem.symbolic import (
+    FARADAY,
+    GAS_CONSTANT,
+    Domain,
+    Field,
+    Parameter,
+    expression_or_parameter,
+)
 from sumfem.symbolic.si import to_si
 
 __all__ = ["Electrolyte", "Ion"]
@@ -219,16 +226,8 @@ class Electrolyte:
             unit=syu.joule / (syu.mol * syu.kelvin),
             doc="Universal gas constant",
         )
-        self._T = (
-            temperature
-            if isinstance(temperature, ufl.core.expr.Expr)
-            else Parameter(
-                f"{name}.T",
-                domain,
-                default=temperature,
-                unit=syu.kelvin,
-                doc="Temperature",
-            )
+        self._T = expression_or_parameter(
+            f"{name}.T", temperature, domain, unit=syu.kelvin, doc="Temperature"
         )
         self._floor = Parameter(
             f"{name}.floor",
@@ -237,27 +236,15 @@ class Electrolyte:
             unit=CONCENTRATION,
             doc="Regularization of positive concentrations",
         )
-        self._density = (
-            density
-            if isinstance(density, ufl.core.expr.Expr)
-            else Parameter(
-                f"{name}.density",
-                domain,
-                default=density,
-                unit=syu.kg / syu.m**3,
-                doc="Density",
-            )
+        self._density = expression_or_parameter(
+            f"{name}.density", density, domain, unit=syu.kg / syu.m**3, doc="Density"
         )
-        self._viscosity = (
-            viscosity
-            if isinstance(viscosity, ufl.core.expr.Expr)
-            else Parameter(
-                f"{name}.viscosity",
-                domain,
-                default=viscosity,
-                unit=syu.pascal * syu.second,
-                doc="Dynamic viscosity",
-            )
+        self._viscosity = expression_or_parameter(
+            f"{name}.viscosity",
+            viscosity,
+            domain,
+            unit=syu.pascal * syu.second,
+            doc="Dynamic viscosity",
         )
         self._ions = types.MappingProxyType({ion.name: ion for ion in ions})
         self._diffusivities = {

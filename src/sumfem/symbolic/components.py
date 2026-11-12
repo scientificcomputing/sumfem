@@ -27,6 +27,7 @@ import functools
 import typing
 
 import numpy.typing as npt
+import sympy
 import ufl
 from ufl.domain import extract_unique_domain
 
@@ -53,6 +54,7 @@ __all__ = [
     "JacobianSum",
     "Residual",
     "ResidualSum",
+    "expression_or_parameter",
     "input_or_parameter",
 ]
 
@@ -87,6 +89,40 @@ def input_or_parameter(
     if value is not None:
         return as_expr(value)
     return Parameter(name, domain, shape=shape, default=default, unit=unit, doc=doc)
+
+
+def expression_or_parameter(
+    name: str,
+    value: ufl.core.expr.Expr | npt.ArrayLike | sympy.Expr | None,
+    domain: Domain,
+    *,
+    shape: tuple[int, ...] = (),
+    unit: Unit | None = None,
+    doc: str = "",
+) -> ufl.core.expr.Expr:
+    """An expression, or else a new parameter with a value as its default.
+
+    Unlike :func:`input_or_parameter`, which turns a number into a constant,
+    a number here becomes the default of a parameter named ``name``, so that
+    it has a unit and can be changed on a discretization. An expression,
+    e.g. a parameter shared with another model or a field, is used as given.
+
+    Args:
+        name: The full name of the parameter, e.g. ``"<model>.<property>"``.
+        value: An expression, used as given, or the default of the
+            parameter, in ``unit`` or a quantity with units; ``None`` for a
+            parameter without a default.
+        domain: The domain of the parameter.
+        shape: The shape of the parameter.
+        unit: The unit of the parameter.
+        doc: A description of the parameter.
+
+    Returns:
+        The expression or the parameter.
+    """
+    if isinstance(value, ufl.core.expr.Expr):
+        return value
+    return Parameter(name, domain, shape=shape, default=value, unit=unit, doc=doc)
 
 
 class Component:

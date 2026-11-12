@@ -18,6 +18,7 @@ from sumfem.symbolic import (
     ResidualSum,
     SystemBuildError,
     build_system,
+    expression_or_parameter,
 )
 
 
@@ -467,3 +468,20 @@ def test_a_vanishing_residual_asks_for_a_zero_form(domain):
 
     with pytest.raises(ComponentError, match="ZeroBaseForm"):
         Vanishing("vanishing").fields
+
+
+def test_an_expression_is_used_and_a_value_becomes_a_parameter():
+    """``expression_or_parameter`` keeps an expression, and makes a number or
+    a quantity the default of a parameter with a unit."""
+    domain = Domain("cell", "interval")
+    shared = Parameter("other.k", domain, default=2.0, unit=syu.siemens / syu.m)
+    assert expression_or_parameter("m.k", shared, domain) is shared
+    unit = syu.siemens / syu.m
+    number = expression_or_parameter("m.k", 1000.0, domain, unit=unit, doc="k")
+    assert isinstance(number, Parameter) and number.name == "m.k"
+    assert number.default_si == pytest.approx(1000.0)
+    quantity = expression_or_parameter(
+        "m.k", 10 * syu.siemens / syu.cm, domain, unit=unit
+    )
+    assert quantity.default_si == pytest.approx(1000.0)
+    assert expression_or_parameter("m.k", None, domain, unit=unit).default_si is None
