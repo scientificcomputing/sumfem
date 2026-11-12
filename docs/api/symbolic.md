@@ -58,6 +58,10 @@
 
 .. autofunction:: expression_or_parameter
 
+.. autodata:: ExpressionOrValue
+
+.. autodata:: ExpressionOrDefault
+
 .. autoclass:: Residual
    :members:
 
@@ -163,6 +167,20 @@
 .. currentmodule:: sumfem.symbolic
 
 .. autofunction:: boltzmann_constant
+
+.. currentmodule:: sumfem.symbolic.si
+
+.. autodata:: CONCENTRATION
+
+.. autodata:: DENSITY
+
+.. autodata:: DIFFUSIVITY
+
+.. autodata:: PERMEABILITY
+
+.. autodata:: VISCOSITY
+
+.. currentmodule:: sumfem.symbolic
 ```
 
 ## Errors

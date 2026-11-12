@@ -11,11 +11,17 @@ parameters are named after it. :class:`Darcy` flow has the pressure alone.
 
 from __future__ import annotations
 
-import numpy.typing as npt
 import sympy.physics.units as syu
 import ufl
 
-from sumfem.symbolic import Field, Residual, ResidualSum, input_or_parameter
+from sumfem.symbolic import (
+    ExpressionOrValue,
+    Field,
+    Residual,
+    ResidualSum,
+    input_or_parameter,
+)
+from sumfem.symbolic.si import DENSITY, VISCOSITY
 
 __all__ = [
     "Brinkman",
@@ -29,14 +35,9 @@ __all__ = [
     "Stokes",
 ]
 
-VISCOSITY = syu.pascal * syu.second
 """Unit of dynamic viscosities."""
 
-DENSITY = syu.kg / syu.m**3
 """Unit of densities."""
-
-INPUT = ufl.core.expr.Expr | npt.ArrayLike | None
-"""A model input: an expression, a value, or ``None`` for a parameter."""
 
 
 class Darcy(Residual):
@@ -73,8 +74,8 @@ class Darcy(Residual):
         self,
         name: str,
         pressure: Field,
-        permeability: INPUT = None,
-        viscosity: INPUT = None,
+        permeability: ExpressionOrValue = None,
+        viscosity: ExpressionOrValue = None,
         markers: tuple[str, ...] = (),
     ):
         super().__init__(name)
@@ -143,7 +144,7 @@ class Stokes(Residual):
         name: str,
         velocity: Field,
         pressure: Field,
-        viscosity: INPUT = None,
+        viscosity: ExpressionOrValue = None,
         markers: tuple[str, ...] = (),
     ):
         super().__init__(name)
@@ -243,7 +244,7 @@ class Convection(_Momentum):
         self,
         name: str,
         velocity: Field,
-        density: INPUT = None,
+        density: ExpressionOrValue = None,
         markers: tuple[str, ...] = (),
     ):
         super().__init__(name, velocity, markers)
@@ -280,8 +281,8 @@ class DarcyDrag(_Momentum):
         self,
         name: str,
         velocity: Field,
-        viscosity: INPUT = None,
-        permeability: INPUT = None,
+        viscosity: ExpressionOrValue = None,
+        permeability: ExpressionOrValue = None,
         markers: tuple[str, ...] = (),
     ):
         super().__init__(name, velocity, markers)
@@ -334,8 +335,8 @@ class ForchheimerDrag(_Momentum):
         self,
         name: str,
         velocity: Field,
-        density: INPUT = None,
-        coefficient: INPUT = None,
+        density: ExpressionOrValue = None,
+        coefficient: ExpressionOrValue = None,
         markers: tuple[str, ...] = (),
         speed_floor: ufl.core.expr.Expr | float = 1e-12,
     ):
@@ -399,7 +400,7 @@ class GradDiv(Residual):
         self,
         name: str,
         velocity: Field,
-        weight: INPUT = None,
+        weight: ExpressionOrValue = None,
         markers: tuple[str, ...] = (),
     ):
         super().__init__(name)
@@ -474,8 +475,8 @@ class NavierStokes(_Flow):
         name: str,
         velocity: Field,
         pressure: Field,
-        viscosity: INPUT = None,
-        density: INPUT = None,
+        viscosity: ExpressionOrValue = None,
+        density: ExpressionOrValue = None,
         markers: tuple[str, ...] = (),
     ):
         domain = velocity.domain
@@ -521,9 +522,9 @@ class Brinkman(_Flow):
         name: str,
         velocity: Field,
         pressure: Field,
-        porosity: INPUT = None,
-        permeability: INPUT = None,
-        viscosity: INPUT = None,
+        porosity: ExpressionOrValue = None,
+        permeability: ExpressionOrValue = None,
+        viscosity: ExpressionOrValue = None,
         markers: tuple[str, ...] = (),
     ):
         domain = velocity.domain
@@ -600,11 +601,11 @@ class BrinkmanForchheimer(Brinkman):
         name: str,
         velocity: Field,
         pressure: Field,
-        porosity: INPUT = None,
-        permeability: INPUT = None,
-        forchheimer: INPUT = None,
-        viscosity: INPUT = None,
-        density: INPUT = None,
+        porosity: ExpressionOrValue = None,
+        permeability: ExpressionOrValue = None,
+        forchheimer: ExpressionOrValue = None,
+        viscosity: ExpressionOrValue = None,
+        density: ExpressionOrValue = None,
         markers: tuple[str, ...] = (),
         speed_floor: float = 1e-12,
     ):

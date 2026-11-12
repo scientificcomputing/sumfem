@@ -14,19 +14,14 @@ from sumfem.symbolic import (
     FARADAY,
     GAS_CONSTANT,
     Domain,
+    ExpressionOrDefault,
     Field,
     Parameter,
     expression_or_parameter,
 )
-from sumfem.symbolic.si import to_si
+from sumfem.symbolic.si import CONCENTRATION, DIFFUSIVITY, to_si
 
 __all__ = ["Electrolyte", "Ion"]
-
-CONCENTRATION = syu.mol / syu.m**3
-"""Unit of concentrations."""
-
-DIFFUSIVITY = syu.m**2 / syu.second
-"""Unit of diffusion coefficients."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -187,30 +182,15 @@ class Electrolyte:
         name: str,
         domain: Domain,
         ions: typing.Sequence[Ion] = (),
-        temperature: ufl.core.expr.Expr | float = 298.15,
-        density: ufl.core.expr.Expr | float | None = None,
-        viscosity: ufl.core.expr.Expr | float | None = None,
+        temperature: ExpressionOrDefault = 298.15,
+        density: ExpressionOrDefault = None,
+        viscosity: ExpressionOrDefault = None,
         concentration_floor: float = 1e-14,
     ):
         names = [ion.name for ion in ions]
         if len(set(names)) != len(names):
             raise ValueError(f"Ion names must be unique, got {names}.")
-        balanced = [ion for ion in ions if ion.concentration is None]
-        if len(balanced) > 1:
-            raise ValueError(
-                "At most one ion can follow from electroneutrality, got "
-                f"{[ion.name for ion in balanced]}."
-            )
-        if balanced and balanced[0].charge == 0:
-            raise ValueError(
-                f"Ion {balanced[0].name!r} has no charge, so electroneutrality "
-                "cannot give its concentration. Give it a field."
-            )
-        if balanced and len(balanced) == len(ions):
-            raise ValueError(
-                "Electroneutrality needs at least one transported ion, got only "
-                f"{balanced[0].name!r}."
-            )
+        balanced = _check_balance(ions)
         self._name = name
         self._F = Parameter(
             f"{name}.F",
@@ -261,8 +241,8 @@ class Electrolyte:
             ion.name: ion.concentration for ion in ions if ion.concentration is not None
         }
         charge = sum(self._ions[n].charge * c for n, c in self._concentrations.items())
-        for ion in balanced:
-            self._concentrations[ion.name] = -charge / ion.charge
+        if balanced is not None:
+            self._concentrations[balanced.name] = -charge / balanced.charge
 
     @property
     def name(self) -> str:
@@ -398,3 +378,39 @@ class Electrolyte:
         return -self.conductivity(correction) * ufl.grad(
             potential
         ) - self.diffusion_current(correction)
+
+
+def _check_balance(ions: typing.Sequence[Ion]) -> Ion | None:
+    """Check that electroneutrality can give the ion without a field, if any.
+
+    Args:
+        ions: The ions of an electrolyte.
+
+    Returns:
+        The one ion without a field, whose concentration follows from
+        electroneutrality, or ``None`` if every ion has one.
+
+    Raises:
+        ValueError: If more than one ion has no field, the ion without one
+            has no charge, or it is the only ion.
+    """
+    balanced = [ion for ion in ions if ion.concentration is None]
+    if len(balanced) > 1:
+        raise ValueError(
+            "At most one ion can follow from electroneutrality, got "
+            f"{[ion.name for ion in balanced]}."
+        )
+    if not balanced:
+        return None
+    (ion,) = balanced
+    if ion.charge == 0:
+        raise ValueError(
+            f"Ion {ion.name!r} has no charge, so electroneutrality cannot give "
+            "its concentration. Give it a field."
+        )
+    if len(ions) == 1:
+        raise ValueError(
+            "Electroneutrality needs at least one transported ion, got only "
+            f"{ion.name!r}."
+        )
+    return ion
