@@ -184,7 +184,9 @@ class RateReaction(Residual):
         measure: The measure to integrate over, e.g. ``domain.dx("Electrode")``,
             ``domain.ds("Surface")`` for a reaction of volume species at a
             surface, or an interface measure. Defaults to the whole domain
-            of the participants.
+            of the participants. A measure of cells or facets gives the
+            domain of the reaction, so its species may live on several
+            subdomains that overlap there.
 
     Example:
         An enzyme converts a substrate ``S`` into a product ``P`` at the
@@ -225,7 +227,7 @@ class RateReaction(Residual):
         self._reactants = {as_expr(k): int(v) for k, v in reactants.items()}
         self._products = {as_expr(k): int(v) for k, v in products.items()}
         fields = self._fields()
-        if not fields:
+        if not fields and type(self)._requires_species:
             raise ValueError(f"Reaction {name!r} has no species that is a field.")
         for nu in (*self._reactants.values(), *self._products.values()):
             if nu < 1:
@@ -234,6 +236,8 @@ class RateReaction(Residual):
         sides = self._sides()
         if sides is not None:
             self._domain = sides[0].parent
+        elif measure is not None and isinstance(measure.ufl_domain(), Domain):
+            self._domain = measure.ufl_domain()
         else:
             self._domain = self._reaction_domain(fields)
         if measure is None:
@@ -246,6 +250,10 @@ class RateReaction(Residual):
 
     _derives_rate: typing.ClassVar[bool] = False
     """Whether a subclass derives the rate, instead of taking it."""
+
+    _requires_species: typing.ClassVar[bool] = True
+    """Whether a reaction needs a species that is a field. A subclass with
+    other terms, e.g. the current of an electrode reaction, may have none."""
 
     @property
     def domain(self) -> Domain:

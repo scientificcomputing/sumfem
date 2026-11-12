@@ -11,13 +11,14 @@ r"""Models of electrochemistry, built on :mod:`sumfem.models`.
   on :class:`ElectrodeReaction`, with the Butler-Volmer equation
   :func:`~sumfem.models.butler_volmer`.
 - Half-cells of a redox flow battery: :class:`RedoxHalfCell`, negative or
-  positive, of any couple and electrolyte.
+  positive, of any :class:`RedoxCouple` and electrolyte.
 
 The package imports from the core of :mod:`sumfem`, and never the other
 way around.
 """
 
 from .charge import ElectrolyteConduction
+from .couple import RedoxCouple
 from .electrolyte import Electrolyte, Ion
 from .half_cell import RedoxHalfCell
 from .kinetics import (
@@ -37,6 +38,7 @@ __all__ = [
     "Region",
     "ElectrolyteConduction",
     "NernstPlanck",
+    "RedoxCouple",
     "RedoxHalfCell",
     "ButlerVolmer",
     "ElectrodeReaction",
