@@ -216,7 +216,9 @@ class ProtonExchangeMembrane(ResidualSum):
         electrokinetic_permeability: :math:`k_\phi`, in m^2 or with units.
         hydraulic_permeability: :math:`k_p`, in m^2 or with units.
         viscosity: The viscosity :math:`\mu` of water, in Pa s or with units.
-        temperature: The temperature :math:`T`, in K.
+        temperature: The temperature :math:`T`: an expression in K, e.g.
+            the field of a heat equation, or the default value of a
+            parameter.
     """
 
     _potential: Field
@@ -250,7 +252,7 @@ class ProtonExchangeMembrane(ResidualSum):
         electrokinetic_permeability: PROPERTY = None,
         hydraulic_permeability: PROPERTY = None,
         viscosity: PROPERTY = None,
-        temperature: float = 298.15,
+        temperature: ufl.core.expr.Expr | float = 298.15,
     ):
         domain = potential.domain
         self._potential = potential
