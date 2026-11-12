@@ -322,8 +322,8 @@ flow_bcs = [
 diffusivity = syu.m**2 / syu.second
 concentration = syu.mol / syu.m**3
 ions = (
-    Ion("V2", 2, 8.10e-12 * diffusivity, positive=True),
-    Ion("V3", 3, 1.65e-11 * diffusivity, positive=True),
+    Ion("V2", 2, 8.10e-12 * diffusivity),
+    Ion("V3", 3, 1.65e-11 * diffusivity),
     Ion("H", 1, 9.312e-9 * diffusivity),
     Ion("HSO4", -1, 1.33e-9 * diffusivity),
     Ion("SO4", -2, 1.065e-9 * diffusivity),

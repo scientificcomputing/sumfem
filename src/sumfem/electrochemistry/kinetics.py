@@ -371,10 +371,7 @@ class ButlerVolmer(ElectrodeReaction):
                 )
 
         def concentrations(ions: dict[str, int]) -> dict[ufl.core.expr.Expr, int]:
-            return {
-                electrolyte.concentration(ion, positive=False): nu
-                for ion, nu in ions.items()
-            }
+            return {electrolyte.concentration(ion): nu for ion, nu in ions.items()}
 
         super().__init__(
             name,
@@ -433,8 +430,8 @@ class ButlerVolmer(ElectrodeReaction):
         """Positive parts of the bulk concentrations of the reduced and oxidized ion."""
         e = self._electrolyte
         return (
-            e.concentration(self._reduced.name, positive=True),
-            e.concentration(self._oxidized.name, positive=True),
+            e.positive_part(e.concentration(self._reduced.name)),
+            e.positive_part(e.concentration(self._oxidized.name)),
         )
 
     def rate_constants(self) -> tuple[ufl.core.expr.Expr, ufl.core.expr.Expr]:

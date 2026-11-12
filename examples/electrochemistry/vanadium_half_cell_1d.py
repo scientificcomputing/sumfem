@@ -139,8 +139,8 @@ electrode = PorousElectrode(
 #
 # The ions of the electrolyte are given with their charges and diffusivities,
 # in their units, which sumfem converts to SI, see {ref}`units-checking`. The
-# vanadium ions take the positive part of their concentrations in the
-# kinetics and the conductivity, as they may be depleted. The concentrations
+# kinetics take the positive part of the vanadium concentrations, as they may
+# be depleted. The concentrations
 # of the reservoir name the ions that are transported, each with a field and
 # the equations of {eq}`half-cell`. Sulfate has none: electroneutrality,
 # the last equation of {eq}`half-cell`, with the charges of the ions,
@@ -171,8 +171,8 @@ electrode = PorousElectrode(
 diffusivity = syu.m**2 / syu.second
 concentration = syu.mol / syu.m**3
 ions = (
-    Ion("V2", 2, 8.10e-12 * diffusivity, positive=True),
-    Ion("V3", 3, 1.65e-11 * diffusivity, positive=True),
+    Ion("V2", 2, 8.10e-12 * diffusivity),
+    Ion("V3", 3, 1.65e-11 * diffusivity),
     Ion("H", 1, 9.312e-9 * diffusivity),
     Ion("HSO4", -1, 1.33e-9 * diffusivity),
     Ion("SO4", -2, 1.065e-9 * diffusivity),
