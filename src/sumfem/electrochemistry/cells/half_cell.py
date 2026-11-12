@@ -10,6 +10,7 @@ Butler-Volmer kinetics of the couple at the fibres.
 from __future__ import annotations
 
 import dataclasses
+import math
 import types
 import typing
 
@@ -26,24 +27,23 @@ from sumfem.models import BoundaryFlux, Conduction, Outflow
 from sumfem.symbolic import (
     DirichletBC,
     Domain,
+    ExpressionOrDefault,
     Field,
     Parameter,
     Residual,
     ResidualSum,
+    expression_or_parameter,
 )
 from sumfem.symbolic.si import CONCENTRATION
 
-from .charge import ElectrolyteConduction
-from .couple import RedoxCouple
-from .electrode import PorousElectrode
-from .electrolyte import Electrolyte, Ion
-from .kinetics import (
+from ..materials import Electrolyte, Ion, PorousElectrode, RedoxCouple, Region
+from ..models import (
     ButlerVolmer,
+    ElectrolyteConduction,
     MassTransferButlerVolmer,
     PistonVelocityButlerVolmer,
+    TransientNernstPlanck,
 )
-from .porous import Region
-from .transport import TransientNernstPlanck
 
 __all__ = ["RedoxHalfCell"]
 
@@ -251,19 +251,19 @@ class RedoxHalfCell:
     _area_ratio: Parameter
     """Ratio of the membrane area to the current collector area."""
 
-    _formal_potential: Parameter
+    _formal_potential: ufl.core.expr.Expr
     """Formal potential of the couple."""
 
-    _rate_constant: Parameter
+    _rate_constant: ufl.core.expr.Expr
     """Standard rate constant of the couple."""
 
-    _anodic_transfer: Parameter
+    _anodic_transfer: ufl.core.expr.Expr
     """Anodic transfer coefficient of the couple."""
 
-    _cathodic_transfer: Parameter
+    _cathodic_transfer: ufl.core.expr.Expr
     """Cathodic transfer coefficient of the couple."""
 
-    _fiber_distance: Parameter | None
+    _fiber_distance: ufl.core.expr.Expr | None
     """Mean distance between the fibres, if the piston velocities limit the
     kinetics."""
 
@@ -293,13 +293,13 @@ class RedoxHalfCell:
         channels: tuple[str, ...] = (),
         velocity: ufl.core.expr.Expr | None = None,
         mass_transfer: bool | None = None,
-        fiber_distance: float | sympy.Expr | None = None,
+        fiber_distance: ExpressionOrDefault = None,
         collector: tuple[str, ...] | None = ("CurrentCollector",),
         membrane: tuple[str, ...] | None = ("Membrane",),
         outlet: tuple[str, ...] = (),
         proton_flux: bool = False,
-        density: ufl.core.expr.Expr | float = 1399.8,
-        viscosity: ufl.core.expr.Expr | float = 6.963e-3,
+        density: ExpressionOrDefault = 1399.8,
+        viscosity: ExpressionOrDefault = 6.963e-3,
         degree: int = 1,
         name: str = "cell",
         phi_s: Field | None = None,
@@ -390,8 +390,8 @@ class RedoxHalfCell:
         self,
         ions: typing.Sequence[Ion],
         name: str,
-        density: ufl.core.expr.Expr | float,
-        viscosity: ufl.core.expr.Expr | float,
+        density: ExpressionOrDefault,
+        viscosity: ExpressionOrDefault,
     ) -> Electrolyte:
         """Create the electrolyte, with the fields of the transported ions.
 
@@ -423,7 +423,7 @@ class RedoxHalfCell:
     def _create_parameters(
         self,
         reservoir: typing.Mapping[str, float | sympy.Expr],
-        fiber_distance: float | sympy.Expr | None,
+        fiber_distance: ExpressionOrDefault,
     ) -> None:
         """Create the parameters of the cell.
 
@@ -465,39 +465,39 @@ class RedoxHalfCell:
             default=1.0,
             doc="Membrane area over current collector area",
         )
-        self._formal_potential = Parameter(
+        self._formal_potential = expression_or_parameter(
             f"{name}.formal_potential",
+            couple.formal_potential,
             domain,
-            default=couple.formal_potential,
             unit=syu.volt,
             doc=f"Formal potential of {pair}",
         )
-        self._rate_constant = Parameter(
+        self._rate_constant = expression_or_parameter(
             f"{name}.rate_constant",
+            couple.rate_constant,
             domain,
-            default=couple.rate_constant,
             unit=syu.m / syu.second,
             doc=f"Standard rate constant of {pair}",
         )
-        self._anodic_transfer = Parameter(
+        self._anodic_transfer = expression_or_parameter(
             f"{name}.anodic_transfer",
+            couple.anodic_transfer,
             domain,
-            default=couple.anodic_transfer,
             doc=f"Anodic transfer coefficient of {pair}",
         )
-        self._cathodic_transfer = Parameter(
+        self._cathodic_transfer = expression_or_parameter(
             f"{name}.cathodic_transfer",
+            couple.cathodic_transfer,
             domain,
-            default=couple.cathodic_transfer,
             doc=f"Cathodic transfer coefficient of {pair}",
         )
         self._fiber_distance = (
             None
             if fiber_distance is None
-            else Parameter(
+            else expression_or_parameter(
                 f"{name}.fiber_distance",
+                fiber_distance,
                 domain,
-                default=fiber_distance,
                 unit=syu.m,
                 doc="Mean distance between the fibres",
             )
@@ -641,12 +641,14 @@ class RedoxHalfCell:
         return models
 
     def _create_functionals(self) -> types.MappingProxyType[str, ufl.Form]:
-        """Create the integrals of the voltage and the state of charge.
+        """Create the integrals of the voltage, the potentials and the state
+        of charge.
 
         Returns:
             The areas and potential integrals of the collector and the
-            membrane, when they have markers, and the amounts of the reduced
-            and oxidized ion, by name.
+            membrane, when they have markers, the volume of the electrode and
+            the integrals over it of the formal and the equilibrium potential,
+            and the amounts of the reduced and oxidized ion, by name.
         """
         domain = self._domain
         functionals: dict[str, ufl.Form] = {}
@@ -658,6 +660,17 @@ class RedoxHalfCell:
             ds_membrane = domain.ds(*self._membrane)
             functionals["membrane_area"] = 1.0 * ds_membrane
             functionals["membrane_potential"] = self._phi_l * ds_membrane
+        couple, e = self._couple, self._electrolyte
+        dx = domain.dx(*self._electrode.markers)
+        ratio = self.reservoir_concentration(
+            couple.oxidized
+        ) / self.reservoir_concentration(couple.reduced)
+        thermal = e.R * e.T / (couple.electrons * e.F)
+        functionals["electrode_volume"] = 1.0 * dx
+        functionals["formal_potential"] = self._formal_potential * dx
+        functionals["equilibrium_potential"] = (
+            self._formal_potential + thermal * math.log(ratio)
+        ) * dx
         for role, ion in (
             ("reduced", self._couple.reduced),
             ("oxidized", self._couple.oxidized),
@@ -720,7 +733,7 @@ class RedoxHalfCell:
         return self._current
 
     @property
-    def formal_potential(self) -> Parameter:
+    def formal_potential(self) -> ufl.core.expr.Expr:
         """Formal potential of the couple."""
         return self._formal_potential
 
@@ -755,36 +768,38 @@ class RedoxHalfCell:
         That is ``E0 + R T / (n F) ln(c_ox / c_red)``, see
         :meth:`~sumfem.electrochemistry.ButlerVolmer.equilibrium_potential`,
         with the reservoir concentrations as given,
-        :meth:`reservoir_concentration`.
+        :meth:`reservoir_concentration`, averaged over the electrode, so that
+        a formal potential or a temperature given as an expression, e.g. of
+        a field, counts with its values on the discretization.
 
         Args:
             discretization: The discretization, for the values of the
-                formal potential and the constants.
+                formal potential, the constants and any fields they hold.
 
         Returns:
-            The potential in V.
+            The mean potential in V.
         """
-        value, couple, e = discretization.value, self._couple, self._electrolyte
-        # The half-cell's electrolyte has the temperature as a parameter
-        assert isinstance(e.T, Parameter)
-        thermal = value(e.R) * value(e.T) / (couple.electrons * value(e.F))
-        ratio = self.reservoir_concentration(
-            couple.oxidized
-        ) / self.reservoir_concentration(couple.reduced)
-        return float(value(self._formal_potential) + thermal * np.log(ratio))
+        assemble = discretization.assemble_scalar
+        f = self._functionals
+        return assemble(f["equilibrium_potential"]) / assemble(f["electrode_volume"])
 
     def initialize(self, discretization: Discretization) -> None:
         """Set a state at rest, as RFBniCS starts.
 
         The concentrations start at their reservoir values, the solid at zero
-        and the electrolyte at minus the formal potential.
+        and the electrolyte at minus the formal potential, its mean over the
+        electrode if it is an expression.
         """
         values: dict[str | ufl.Coefficient, typing.Any] = {
             c: discretization.value(self._inlet[ion])
             for ion, c in self._concentrations.items()
         }
+        assemble = discretization.assemble_scalar
+        f = self._functionals
         values[self._phi_s] = 0.0
-        values[self._phi_l] = -discretization.value(self._formal_potential)
+        values[self._phi_l] = -assemble(f["formal_potential"]) / assemble(
+            f["electrode_volume"]
+        )
         discretization.set(values)
 
     def _check_boundaries(self, what: str) -> None:

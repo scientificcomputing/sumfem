@@ -22,7 +22,7 @@ from sumfem.symbolic import (
 )
 from sumfem.symbolic.si import CONCENTRATION, DIFFUSIVITY, PERMEABILITY, VISCOSITY
 
-from .electrolyte import Electrolyte
+from ..materials import Electrolyte
 
 __all__ = ["MembraneProtonFlux", "ProtonExchangeMembrane", "SchloeglFlow"]
 

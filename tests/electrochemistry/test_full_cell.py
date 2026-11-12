@@ -9,6 +9,7 @@ import dolfinx.mesh
 import numpy as np
 import pytest
 import sympy.physics.units as syu
+import ufl
 
 from sumfem.discrete import DomainMaps, MeshData, discretize
 from sumfem.electrochemistry import (
@@ -20,11 +21,12 @@ from sumfem.electrochemistry import (
     MembraneSpec,
     RedoxCouple,
 )
-from sumfem.models import Accumulation
+from sumfem.models import Accumulation, Diffusion
 from sumfem.solvers import BDF, Simulation
 from sumfem.symbolic import (
     Clock,
     Domain,
+    Field,
     Parameter,
     build_system,
     value_at_defaults,
@@ -521,3 +523,75 @@ def test_any_flow_plugs_into_the_cell():
         1.0 * inlet
     )
     assert 0 < mean < 0.99 * drop
+
+
+def test_inputs_can_be_fields_of_other_models():
+    """The properties of the electrodes and the couples may be expressions of
+    the fields of other models: here a temperature, which sets the
+    conductivity of the fibres, an Arrhenius rate constant and a formal
+    potential that changes with it, and a compression, which sets the
+    porosity. Their parameters are then not created, the units are
+    consistent, and a cell at rest starts and stays at the Nernst voltage of
+    that temperature."""
+    domain = Domain("cell", "interval", length_scale=4e-3)
+    T = Field("T", domain, ("Lagrange", 1), unit=syu.kelvin, scale=300.0)
+    strain = Field("strain", domain, ("Lagrange", 1))
+    reference = 298.15 * syu.kelvin
+    slope = 1e-3 * syu.volt / syu.kelvin
+    activation = 4e3 * syu.kelvin
+    sides = []
+    for spec in (NEGATIVE, POSITIVE):
+        couple = dataclasses.replace(
+            spec.couple,
+            rate_constant=spec.couple.rate_constant
+            * ufl.exp(-activation * (1 / T - 1 / reference)),
+            formal_potential=spec.couple.formal_potential + slope * (T - reference),
+            reactants=None if spec is NEGATIVE else spec.couple.reactants,
+            products=None if spec is NEGATIVE else spec.couple.products,
+        )
+        sides.append(
+            dataclasses.replace(
+                spec,
+                couple=couple,
+                porosity=0.68 * (1 - 0.1 * strain),
+                conductivity=500.0 * syu.siemens / syu.m * (T / reference),
+            )
+        )
+    cell = FullCell(domain, *sides, membrane=MEMBRANE)
+    heat = Diffusion(
+        "heat",
+        T,
+        Parameter("heat.k", domain, default=0.6, unit=syu.watt / (syu.m * syu.kelvin)),
+    )
+    compression = Diffusion("compression", strain, 1.0)
+    model = cell.model + heat + compression
+    system = build_system(model, check_units=True)
+    assert "negative_electrode.porosity" not in system.parameters
+    assert "positive.rate_constant" not in system.parameters
+    assert {T, strain} <= set(system.unknowns)
+
+    disc = discretize(
+        [model, *cell.conditions()],
+        DomainMaps({domain: create_cell_mesh()}),
+        max_quadrature_degree=4,
+    )
+    temperature = 308.15
+    disc.set({T: temperature, strain: 0.1})
+    cell.initialize(disc)
+    simulation = Simulation(
+        disc,
+        model,
+        cell.conditions(),
+        clock=Clock(domain, dt=1.0),
+        scheme=BDF(1),
+        petsc_options={"snes_linesearch_type": "bt", "snes_max_it": 50},
+        check_units=True,
+        factorize_equations=True,
+        time_scale=1.0,
+    )
+    RT_F = 8.314462618 * temperature / 96485.33212
+    shift = 2 * 1e-3 * (temperature - 298.15)
+    expected = 1.004 + 0.255 + shift + 2 * RT_F * np.log(27.0 / 1053.0)
+    assert cell.voltage(disc) == pytest.approx(expected, rel=1e-9)
+    simulation.run(num_steps=1)
+    assert cell.voltage(disc) == pytest.approx(expected, rel=1e-8)

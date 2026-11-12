@@ -14,9 +14,8 @@ import sympy
 
 from sumfem.symbolic import ExpressionOrDefault
 
-from .couple import RedoxCouple
-from .electrode import DarcyFlow, ElectrodeFlow, FlowSetup
-from .electrolyte import Ion
+from ..materials import Ion, RedoxCouple
+from ..models import DarcyFlow, ElectrodeFlow, FlowSetup
 
 __all__ = ["FlowSpec", "HalfCellSpec", "MembraneSpec"]
 
@@ -31,6 +30,13 @@ PROTONS = "H"
 class HalfCellSpec:
     """One side of a full cell: its electrolyte, its couple and its electrode.
 
+    The properties of the electrode and the electrolyte, from the porosity
+    on, are each an expression, used as given, e.g. a field of another model
+    such as the porosity of a compressed felt or a viscosity of the
+    temperature, or the default of the parameter the cell creates, see
+    :func:`~sumfem.symbolic.expression_or_parameter`. The reservoir
+    concentrations are values: with flow, the tanks change them.
+
     Attributes:
         ions: The ions of the electrolyte, see :class:`RedoxHalfCell`.
             Water, ``"H2O"``, if transported, must be an ion of both sides,
@@ -38,9 +44,6 @@ class HalfCellSpec:
         reservoir: The initial concentration of each transported ion, see
             :class:`RedoxHalfCell`, and with flow, that of its tank. The
             protons, ``"H"``, must be one of them.
-
-    Raises:
-        ValueError: If the side does not transport protons.
         couple: The redox couple of the side.
         porosity: The porosity of the electrode.
         conductivity: The conductivity of the electrode's fibres, in S/m or
@@ -61,19 +64,22 @@ class HalfCellSpec:
         density: The density of the electrolyte, in kg/m^3 or with units.
         viscosity: The dynamic viscosity of the electrolyte, in Pa s or with
             units, which the flow and the mass transfer share.
+
+    Raises:
+        ValueError: If the side does not transport protons.
     """
 
     ions: tuple[Ion, ...]
     reservoir: typing.Mapping[str, float | sympy.Expr]
     couple: RedoxCouple
-    porosity: float
-    conductivity: float | sympy.Expr
-    specific_area: float | sympy.Expr
-    fiber_distance: float | sympy.Expr | None = None
-    fiber_diameter: float | sympy.Expr | None = None
-    kozeny_carman_constant: float | None = None
-    density: float | sympy.Expr = 1399.8
-    viscosity: float | sympy.Expr = 6.963e-3
+    porosity: ExpressionOrDefault
+    conductivity: ExpressionOrDefault
+    specific_area: ExpressionOrDefault
+    fiber_distance: ExpressionOrDefault = None
+    fiber_diameter: ExpressionOrDefault = None
+    kozeny_carman_constant: ExpressionOrDefault = None
+    density: ExpressionOrDefault = 1399.8
+    viscosity: ExpressionOrDefault = 6.963e-3
 
     def __post_init__(self) -> None:
         if PROTONS not in self.reservoir:

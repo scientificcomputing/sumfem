@@ -31,9 +31,9 @@ from sumfem.symbolic import (
 )
 from sumfem.symbolic.si import CONCENTRATION, DENSITY, VISCOSITY
 
-from .electrode import ElectrodeFlow, FlowSetup, PorousElectrode
+from ..materials import PorousElectrode
+from ..models import ElectrodeFlow, FlowSetup, ProtonExchangeMembrane
 from .half_cell import RedoxHalfCell
-from .membrane import ProtonExchangeMembrane
 from .specs import PROTONS, WATER, FlowSpec, HalfCellSpec, MembraneSpec
 
 __all__ = ["FullCell"]

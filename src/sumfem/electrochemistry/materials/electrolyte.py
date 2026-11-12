@@ -14,6 +14,7 @@ from sumfem.symbolic import (
     FARADAY,
     GAS_CONSTANT,
     Domain,
+    ExpressionOrDefault,
     Field,
     Parameter,
     expression_or_parameter,
@@ -181,9 +182,9 @@ class Electrolyte:
         name: str,
         domain: Domain,
         ions: typing.Sequence[Ion] = (),
-        temperature: ufl.core.expr.Expr | float = 298.15,
-        density: ufl.core.expr.Expr | float | None = None,
-        viscosity: ufl.core.expr.Expr | float | None = None,
+        temperature: ExpressionOrDefault = 298.15,
+        density: ExpressionOrDefault = None,
+        viscosity: ExpressionOrDefault = None,
         concentration_floor: float = 1e-14,
     ):
         names = [ion.name for ion in ions]

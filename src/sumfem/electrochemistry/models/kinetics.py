@@ -15,7 +15,7 @@ import ufl
 from sumfem.models import RateReaction, butler_volmer
 from sumfem.symbolic import ExpressionOrValue, Field, as_expr
 
-from .electrolyte import Electrolyte, Ion
+from ..materials import Electrolyte, Ion
 
 __all__ = [
     "ButlerVolmer",
@@ -277,7 +277,7 @@ class ButlerVolmer(ElectrodeReaction):
     of the reduced and oxidized ion at the electrode surface. These are, by
     default, the smooth positive parts of the bulk concentrations,
     :math:`c^+ = (c + \sqrt{c^2 + c_\text{floor}^2}) / 2`, see
-    :meth:`~sumfem.electrochemistry.electrolyte.Electrolyte.positive_part`.
+    :meth:`~sumfem.electrochemistry.Electrolyte.positive_part`.
     The reduced and oxidized ions are ions in the electrolyte, given by name.
 
     Subclasses change the kinetics by overriding

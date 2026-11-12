@@ -4,7 +4,15 @@
 .. automodule:: sumfem.electrochemistry
 ```
 
-## Electrolytes
+## Materials
+
+```{eval-rst}
+.. automodule:: sumfem.electrochemistry.materials
+
+.. currentmodule:: sumfem.electrochemistry
+```
+
+### Electrolytes
 
 ```{eval-rst}
 .. autoclass:: Electrolyte
@@ -14,26 +22,32 @@
    :members:
 ```
 
-## Porous electrodes and their flow
+### Redox couples
+
+```{eval-rst}
+.. autoclass:: RedoxCouple
+   :members:
+```
+
+### Porous electrodes
 
 ```{eval-rst}
 .. autoclass:: PorousElectrode
-   :members:
-
-.. autoclass:: ElectrodeFlow
-   :members:
-
-.. autoclass:: DarcyFlow
-   :members:
-
-.. autoclass:: FlowSetup
    :members:
 
 .. autoclass:: Region
    :members:
 ```
 
-## Charge and transport
+## Models
+
+```{eval-rst}
+.. automodule:: sumfem.electrochemistry.models
+
+.. currentmodule:: sumfem.electrochemistry
+```
+
+### Charge and transport
 
 ```{eval-rst}
 .. autoclass:: ElectrolyteConduction
@@ -46,7 +60,7 @@
    :members:
 ```
 
-## Kinetics
+### Kinetics
 
 ```{eval-rst}
 .. autoclass:: ElectrodeReaction
@@ -65,7 +79,7 @@
    :members:
 ```
 
-## Membranes
+### Membranes
 
 ```{eval-rst}
 .. autoclass:: ProtonExchangeMembrane
@@ -78,17 +92,35 @@
    :members:
 ```
 
-## Half-cells
+### Flow through the electrodes
 
 ```{eval-rst}
-.. autoclass:: RedoxCouple
+.. autoclass:: ElectrodeFlow
    :members:
 
+.. autoclass:: DarcyFlow
+   :members:
+
+.. autoclass:: FlowSetup
+   :members:
+```
+
+## Cells
+
+```{eval-rst}
+.. automodule:: sumfem.electrochemistry.cells
+
+.. currentmodule:: sumfem.electrochemistry
+```
+
+### Half-cells
+
+```{eval-rst}
 .. autoclass:: RedoxHalfCell
    :members:
 ```
 
-## Full cells
+### Full cells
 
 ```{eval-rst}
 .. autoclass:: FullCell
