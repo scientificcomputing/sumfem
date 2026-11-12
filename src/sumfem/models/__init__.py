@@ -1,8 +1,9 @@
 """Models built on :mod:`sumfem`, to be summed and extended.
 
-- Accumulation, diffusion and sources: :class:`Accumulation`,
-  :class:`Diffusion`, :class:`Source` and :class:`Poisson`, and Ohmic
-  :class:`Conduction`.
+- Accumulation, diffusion, advection and sources: :class:`Accumulation`,
+  :class:`Diffusion`, :class:`ConvectiveAdvection` and
+  :class:`ConservativeAdvection`, :class:`Source` and :class:`Poisson`, and
+  Ohmic :class:`Conduction`.
 - Boundaries: :class:`BoundaryFlux`, :class:`Outflow`, and constraints
   with Lagrange multipliers, :class:`BoundaryConstraint` and
   :class:`DirichletMultiplier`.
@@ -25,6 +26,7 @@
 Models of electrochemistry are in :mod:`sumfem.electrochemistry`.
 """
 
+from .advection import Advection, ConservativeAdvection, ConvectiveAdvection
 from .boundary import BoundaryConstraint, BoundaryFlux, DirichletMultiplier, Outflow
 from .charge import Conduction
 from .diffusion import Accumulation, Diffusion, Poisson, Source
@@ -60,6 +62,9 @@ __all__ = [
     "RateReaction",
     "Reaction",
     "Accumulation",
+    "Advection",
+    "ConservativeAdvection",
+    "ConvectiveAdvection",
     "BoundaryConstraint",
     "BoundaryFlux",
     "Conduction",

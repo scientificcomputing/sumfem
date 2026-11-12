@@ -4,13 +4,22 @@
 .. automodule:: sumfem.models
 ```
 
-## Accumulation, diffusion and sources
+## Accumulation, diffusion, advection and sources
 
 ```{eval-rst}
 .. autoclass:: Accumulation
    :members:
 
 .. autoclass:: Diffusion
+   :members:
+
+.. autoclass:: Advection
+   :members:
+
+.. autoclass:: ConvectiveAdvection
+   :members:
+
+.. autoclass:: ConservativeAdvection
    :members:
 
 .. autoclass:: Source
