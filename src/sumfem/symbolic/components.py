@@ -54,14 +54,27 @@ __all__ = [
     "JacobianSum",
     "Residual",
     "ResidualSum",
+    "ExpressionOrDefault",
+    "ExpressionOrValue",
     "expression_or_parameter",
     "input_or_parameter",
 ]
 
 
+ExpressionOrValue: typing.TypeAlias = ufl.core.expr.Expr | npt.ArrayLike | None
+"""A model input: an expression, a value converted with :func:`as_expr`,
+or ``None`` for a parameter, see :func:`input_or_parameter`."""
+
+ExpressionOrDefault: typing.TypeAlias = (
+    ufl.core.expr.Expr | npt.ArrayLike | sympy.Expr | None
+)
+"""A property: an expression, used as given, or the default of a parameter,
+``None`` for none, see :func:`expression_or_parameter`."""
+
+
 def input_or_parameter(
     name: str,
-    value: ufl.core.expr.Expr | npt.ArrayLike | None,
+    value: ExpressionOrValue,
     domain: Domain,
     *,
     shape: tuple[int, ...] = (),
@@ -93,7 +106,7 @@ def input_or_parameter(
 
 def expression_or_parameter(
     name: str,
-    value: ufl.core.expr.Expr | npt.ArrayLike | sympy.Expr | None,
+    value: ExpressionOrDefault,
     domain: Domain,
     *,
     shape: tuple[int, ...] = (),
@@ -216,7 +229,7 @@ class Component:
     def input(
         self,
         name: str,
-        value: ufl.core.expr.Expr | npt.ArrayLike | None = None,
+        value: ExpressionOrValue = None,
         *,
         domain: Domain,
         element: ElementSpec | None = None,
