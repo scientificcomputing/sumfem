@@ -10,6 +10,8 @@ r"""Models of electrochemistry, built on :mod:`sumfem.models`.
   :class:`MassTransferButlerVolmer` and :class:`PistonVelocityButlerVolmer`,
   on :class:`ElectrodeReaction`, with the Butler-Volmer equation
   :func:`~sumfem.models.butler_volmer`.
+- Membranes: :class:`ProtonExchangeMembrane`, with the flow of water of
+  :class:`SchloeglFlow`.
 - Half-cells of a redox flow battery: :class:`RedoxHalfCell`, negative or
   positive, of any :class:`RedoxCouple` and electrolyte.
 
@@ -28,6 +30,7 @@ from .kinetics import (
     MassTransferButlerVolmer,
     PistonVelocityButlerVolmer,
 )
+from .membrane import ProtonExchangeMembrane, SchloeglFlow
 from .porous import PorousElectrode, Region
 from .transport import NernstPlanck, TransientNernstPlanck
 
@@ -39,6 +42,8 @@ __all__ = [
     "ElectrolyteConduction",
     "NernstPlanck",
     "TransientNernstPlanck",
+    "ProtonExchangeMembrane",
+    "SchloeglFlow",
     "RedoxCouple",
     "RedoxHalfCell",
     "ButlerVolmer",
