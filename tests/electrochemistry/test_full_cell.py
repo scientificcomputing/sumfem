@@ -1,4 +1,6 @@
-"""The full cell of Shah et al. (2008), corrected, in one dimension."""
+"""The full cell of Shah et al. (2008), corrected, in one and two dimensions."""
+
+import dataclasses
 
 from mpi4py import MPI
 
@@ -10,14 +12,23 @@ import sympy.physics.units as syu
 
 from sumfem.discrete import DomainMaps, MeshData, discretize
 from sumfem.electrochemistry import (
+    DarcyFlow,
+    FlowSpec,
     FullCell,
     HalfCellSpec,
     Ion,
     MembraneSpec,
     RedoxCouple,
 )
+from sumfem.models import Accumulation
 from sumfem.solvers import BDF, Simulation
-from sumfem.symbolic import Clock, Domain, build_system
+from sumfem.symbolic import (
+    Clock,
+    Domain,
+    Parameter,
+    build_system,
+    value_at_defaults,
+)
 
 DIFFUSIVITY = syu.m**2 / syu.second
 CONCENTRATION = syu.mol / syu.m**3
@@ -41,7 +52,7 @@ ACID = {
 corrected from 4.2e3 to 4.2e4 mol/m^3."""
 
 
-def ions(reduced, oxidized, charges, diffusivity):
+def create_ions(reduced, oxidized, charges, diffusivity):
     """The ions of a side: its couple, protons, bisulfate, water and sulfate."""
     return (
         Ion(reduced, charges[0], diffusivity * DIFFUSIVITY),
@@ -62,7 +73,7 @@ ELECTRODE = dict(
 """The carbon felt of both sides, Tables 3 and 5."""
 
 NEGATIVE = HalfCellSpec(
-    ions=ions("V2", "V3", (2, 3), 2.4e-10),
+    ions=create_ions("V2", "V3", (2, 3), 2.4e-10),
     reservoir={"V2": 27.0 * CONCENTRATION, "V3": 1053.0 * CONCENTRATION, **ACID},
     couple=RedoxCouple("V2", "V3", 0.68 * 1.75e-7, -0.255, True),
     **ELECTRODE,
@@ -70,7 +81,7 @@ NEGATIVE = HalfCellSpec(
 """The negative side at 5% state of charge."""
 
 POSITIVE = HalfCellSpec(
-    ions=ions("VO", "VO2", (2, 1), 3.9e-10),
+    ions=create_ions("VO", "VO2", (2, 1), 3.9e-10),
     reservoir={"VO": 1053.0 * CONCENTRATION, "VO2": 27.0 * CONCENTRATION, **ACID},
     couple=RedoxCouple(
         "VO",
@@ -91,7 +102,7 @@ MEMBRANE = MembraneSpec(
 """The membrane, Tables 4 and 5."""
 
 
-def cell_mesh(comm=MPI.COMM_WORLD) -> MeshData:
+def create_cell_mesh(comm=MPI.COMM_WORLD) -> MeshData:
     """The layers of the cell on an interval, with their markers."""
     edges = np.cumsum([0.0, *(width for _, width, _ in LAYERS)])
     if comm.rank == 0:
@@ -126,14 +137,14 @@ def cell_mesh(comm=MPI.COMM_WORLD) -> MeshData:
     return FullCell.mesh_data(MeshData.from_locators(mesh, {1: layers, 0: facets}))
 
 
-def full_cell():
+def create_full_cell():
     """The cell of Shah et al. on its domain."""
     domain = Domain("cell", "interval", length_scale=4e-3)
     return FullCell(domain, NEGATIVE, POSITIVE, membrane=MEMBRANE), domain
 
 
 def test_the_full_cell_has_consistent_units_and_shared_fields():
-    cell, _ = full_cell()
+    cell, _ = create_full_cell()
     system = build_system(cell.model, check_units=True)
     names = sorted(f.name for f in system.unknowns)
     assert names.count("phi_l") == 1 and names.count("c_H2O") == 1
@@ -158,22 +169,22 @@ def test_the_sides_must_share_protons_and_water(change, message):
     ions = tuple(
         i for i in POSITIVE.ions if i.name in (*change(POSITIVE.reservoir), "SO4")
     )
-    positive = HalfCellSpec(
-        ions=ions,
-        reservoir=change(POSITIVE.reservoir),
-        couple=POSITIVE.couple,
-        **ELECTRODE,
-    )
     with pytest.raises(ValueError, match=message):
+        positive = HalfCellSpec(
+            ions=ions,
+            reservoir=change(POSITIVE.reservoir),
+            couple=POSITIVE.couple,
+            **ELECTRODE,
+        )
         FullCell(domain, NEGATIVE, positive, membrane=MEMBRANE)
 
 
 def simulate(current, steps, dt=1.0):
     """Run the cell at a current density from rest, with what the tests need."""
-    cell, domain = full_cell()
-    marked = cell_mesh()
+    cell, domain = create_full_cell()
+    marked = create_cell_mesh()
     disc = discretize(
-        [cell.model, *cell.ground()],
+        [cell.model, *cell.conditions()],
         DomainMaps({domain: marked}),
         max_quadrature_degree=4,
     )
@@ -182,7 +193,7 @@ def simulate(current, steps, dt=1.0):
     simulation = Simulation(
         disc,
         cell.model,
-        cell.ground(),
+        cell.conditions(),
         clock=clock,
         scheme=BDF(1),
         petsc_options={"snes_linesearch_type": "bt", "snes_max_it": 50},
@@ -276,7 +287,7 @@ def test_the_protons_cross_a_face_from_their_own_side():
     """The proton flux is a condition of an electrode's protons on its face,
     with the membrane on the other side; a face seen from the wrong side, or
     a measure that knows no sides, is rejected."""
-    cell, domain = full_cell()
+    cell, domain = create_full_cell()
     negative = cell.half_cells["negative"].concentrations["H"]
     electrode = cell.subdomain("NegativeElectrode")
     membrane = cell.subdomain("Membrane")
@@ -295,3 +306,218 @@ def test_the_protons_cross_a_face_from_their_own_side():
         )
     with pytest.raises(ValueError, match="Domain.interface"):
         proton_flux("wrong", negative, domain.dS("NegativeFace"))
+
+
+HEIGHT = 1e-2
+"""The height of the 2D cell, from the inlets to the outlets, in m."""
+
+FLOW = FlowSpec(inlet_velocity=2.5e-3, tank_ratio=8.0)
+"""Shah et al.'s 1 mL/s through an electrode of 4 mm by 10 cm, Table 2,
+and tanks of about the paper's 250 mL each, Table 3."""
+
+FLOWING = dict(fiber_diameter=10 * syu.micrometer, kozeny_carman_constant=5.55)
+"""What the flow needs of the felt of both sides, Tables 3 and 5."""
+
+MEMBRANE_FLOW = MembraneSpec(
+    fixed_charge=1200.0,
+    proton_diffusivity=1.4e-9,
+    water_diffusivity=5.75e-10,
+    electrokinetic_permeability=1.13e-19,
+    hydraulic_permeability=1.58e-18,
+    viscosity=1e-3,
+)
+"""The membrane with the flow of its water, Table 5."""
+
+
+def create_flowing_mesh(
+    comm=MPI.COMM_WORLD, columns=(2, 6, 2, 6, 2), rows=4
+) -> MeshData:
+    """The layers of the cell on a rectangle of the cell's height, with the
+    inlets of the electrodes at the bottom and their outlets at the top."""
+    edges = np.cumsum([0.0, *(width for _, width, _ in LAYERS)])
+    xs = np.unique(
+        np.concatenate(
+            [np.linspace(a, b, n + 1) for a, b, n in zip(edges, edges[1:], columns)]
+        )
+    )
+    mesh = dolfinx.mesh.create_rectangle(
+        comm, [[0.0, 0.0], [1.0, HEIGHT]], [len(xs) - 1, rows]
+    )
+    # Move the vertices of the uniform grid onto the edges of the layers
+    index = np.rint(mesh.geometry.x[:, 0] * (len(xs) - 1)).astype(int)
+    mesh.geometry.x[:, 0] = xs[index]
+    tolerance = 1e-9
+
+    def between(a, b):
+        return lambda x: (x[0] >= a - tolerance) & (x[0] <= b + tolerance)
+
+    def end(a, b, y):
+        return lambda x: between(a, b)(x) & np.isclose(x[1], y, atol=tolerance)
+
+    layers = {name: between(a, b) for (name, *_), a, b in zip(LAYERS, edges, edges[1:])}
+    facets = {
+        "NegativeTerminal": lambda x: np.isclose(x[0], edges[0], atol=tolerance),
+        "NegativeFace": lambda x: np.isclose(x[0], edges[2], atol=tolerance),
+        "PositiveFace": lambda x: np.isclose(x[0], edges[3], atol=tolerance),
+        "PositiveTerminal": lambda x: np.isclose(x[0], edges[5], atol=tolerance),
+        "NegativeInlet": end(edges[1], edges[2], 0.0),
+        "NegativeOutlet": end(edges[1], edges[2], HEIGHT),
+        "PositiveInlet": end(edges[3], edges[4], 0.0),
+        "PositiveOutlet": end(edges[3], edges[4], HEIGHT),
+    }
+    marked = MeshData.from_locators(mesh, {2: layers, 1: facets})
+    return FullCell.mesh_data(marked)
+
+
+def create_flowing_cell(current, dt=1.0, flow=FLOW):
+    """The cell of Shah et al. in 2D, with flow and tanks, from rest."""
+    domain = Domain("cell", "triangle", length_scale=HEIGHT)
+    sides = [dataclasses.replace(s, **FLOWING) for s in (NEGATIVE, POSITIVE)]
+    cell = FullCell(domain, *sides, membrane=MEMBRANE_FLOW, flow=flow)
+    disc = discretize(
+        [cell.model, *cell.conditions()],
+        DomainMaps({domain: create_flowing_mesh()}),
+        max_quadrature_degree=4,
+    )
+    cell.initialize(disc)
+    simulation = Simulation(
+        disc,
+        cell.model,
+        cell.conditions(),
+        clock=Clock(domain, dt=dt),
+        scheme=BDF(1),
+        petsc_options={"snes_linesearch_type": "bt", "snes_max_it": 50},
+        check_units=True,
+        factorize_equations=True,
+        time_scale=dt,
+    )
+    disc.set({cell.current: current})
+    return cell, disc, simulation, domain
+
+
+def totals(cell, disc):
+    """The amounts per unit depth in the cell and its tanks, by name."""
+    amounts = inventories(cell, disc)
+    water = 0.0
+    for side, half in cell.half_cells.items():
+        volume = cell.tank_volume(disc, side)
+        for ion in half.concentrations:
+            tank = volume * float(disc.value(half.inlet[ion]))
+            if ion == "H2O":
+                water += tank
+            else:
+                amounts[f"{side}_{ion}"] += tank
+    amounts["water"] += water
+    return amounts
+
+
+def test_a_cell_at_rest_with_flow_stays_at_rest():
+    """The tanks hold the electrolyte the cell starts with, so without current
+    the flow changes nothing, and the pressure falls through each electrode
+    by the drop ``mu v H / K`` of a uniform flow."""
+    cell, disc, simulation, domain = create_flowing_cell(0.0)
+    before, voltage = totals(cell, disc), cell.voltage(disc)
+    simulation.run(num_steps=2, callback=lambda t, step: cell.update_tanks(disc, 1.0))
+    after = totals(cell, disc)
+    for name, amount in before.items():
+        assert after[name] == pytest.approx(amount, rel=1e-8), name
+    assert cell.voltage(disc) == pytest.approx(voltage, abs=1e-8)
+
+    electrode = cell.half_cells["negative"].electrode
+    viscosity = cell.half_cells["negative"].electrolyte.viscosity
+    drop = value_at_defaults(viscosity * 2.5e-3 * HEIGHT / electrode.permeability())
+    inlet = cell.subdomain("NegativeElectrode").ds("NegativeInlet")
+    mean = disc.assemble_scalar(cell.pressure * inlet) / disc.assemble_scalar(
+        1.0 * inlet
+    )
+    assert mean == pytest.approx(drop, rel=1e-6)
+
+
+def test_a_discharging_cell_and_its_tanks_conserve_every_ion():
+    """With flow and tanks, the cell and its tanks together keep the vanadium
+    and the bisulfate of each side, turn over ``Q / F`` of each couple, with
+    ``Q`` the charge through the terminals of the cell's height, and gain the
+    water that the positive couple makes.
+
+    Each side loses the protons that carry the current through the membrane,
+    ``Q / F``, only to first order in the mesh size in two dimensions: the
+    current of the membrane's cells at a face differs from the current the
+    electrode's reactions send to it by the discretization error. It halves
+    as the mesh is refined.
+    """
+    current, steps, dt = 100.0, 3, 1.0
+    cell, disc, simulation, _ = create_flowing_cell(current, dt)
+    before = totals(cell, disc)
+    simulation.run(
+        num_steps=steps, callback=lambda t, step: cell.update_tanks(disc, dt)
+    )
+    after = totals(cell, disc)
+    change = {name: after[name] - before[name] for name in before}
+    moles = current * HEIGHT * steps * dt / 96485.33212
+    for side, reduced, oxidized, sign in (
+        ("negative", "V2", "V3", 1.0),
+        ("positive", "VO", "VO2", -1.0),
+    ):
+        assert change[f"{side}_{reduced}"] == pytest.approx(-sign * moles, rel=1e-8)
+        assert change[f"{side}_{oxidized}"] == pytest.approx(sign * moles, rel=1e-8)
+        assert change[f"{side}_HSO4"] == pytest.approx(0.0, abs=1e-8 * moles)
+        assert change[f"{side}_H"] == pytest.approx(-moles, rel=2e-2)
+    assert change["water"] == pytest.approx(moles, rel=1e-8)
+
+
+class StoredDarcyFlow(DarcyFlow):
+    """Darcy flow with a storage of the pressure in the electrodes: a flow
+    that changes in time, plugged into the cell in a few lines."""
+
+    @property
+    def models(self):
+        storage = Accumulation(
+            f"{self.setup.name}_storage",
+            self.pressure,
+            weight=Parameter(
+                "storage.storativity",
+                self.setup.domain,
+                default=1e-3,
+                unit=1 / syu.pascal,
+            ),
+            markers=("NegativeElectrode", "PositiveElectrode"),
+        )
+        return [*super().models, storage]
+
+
+def test_any_flow_plugs_into_the_cell():
+    """A flow of the cell's own making, here one that changes in time, takes
+    the place of Darcy flow. Its storage keeps the pressure below the steady
+    drop of Darcy flow over the steps, so its velocity is not divergence
+    free; the cell and its tanks still conserve the vanadium and turn over
+    ``Q / F`` of each couple, as the species balances hold the flux of
+    whatever velocity the flow gives."""
+    current, steps, dt = 100.0, 3, 1.0
+    flow = dataclasses.replace(FLOW, model=StoredDarcyFlow)
+    cell, disc, simulation, _ = create_flowing_cell(current, dt, flow=flow)
+    assert isinstance(cell.flow, StoredDarcyFlow)
+    assert "cell_storage" in [m.name for m in cell.model.components]
+    before = totals(cell, disc)
+    simulation.run(
+        num_steps=steps, callback=lambda t, step: cell.update_tanks(disc, dt)
+    )
+    after = totals(cell, disc)
+    moles = current * HEIGHT * steps * dt / 96485.33212
+    for side, reduced, oxidized, sign in (
+        ("negative", "V2", "V3", 1.0),
+        ("positive", "VO", "VO2", -1.0),
+    ):
+        change = after[f"{side}_{oxidized}"] - before[f"{side}_{oxidized}"]
+        assert change == pytest.approx(sign * moles, rel=1e-8)
+        vanadium = (after[f"{side}_{reduced}"] + after[f"{side}_{oxidized}"]) - (
+            before[f"{side}_{reduced}"] + before[f"{side}_{oxidized}"]
+        )
+        assert vanadium == pytest.approx(0.0, abs=1e-8 * moles)
+    electrode = cell.half_cells["negative"].electrode
+    viscosity = cell.half_cells["negative"].electrolyte.viscosity
+    drop = value_at_defaults(viscosity * 2.5e-3 * HEIGHT / electrode.permeability())
+    inlet = cell.subdomain("NegativeElectrode").ds("NegativeInlet")
+    mean = disc.assemble_scalar(cell.pressure * inlet) / disc.assemble_scalar(
+        1.0 * inlet
+    )
+    assert 0 < mean < 0.99 * drop

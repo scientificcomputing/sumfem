@@ -90,4 +90,7 @@
 
 .. autoclass:: MembraneSpec
    :members:
+
+.. autoclass:: FlowSpec
+   :members:
 ```

@@ -17,7 +17,8 @@ r"""Models of electrochemistry, built on :mod:`sumfem.models`.
   positive, of any :class:`RedoxCouple` and electrolyte.
 - Full cells: :class:`FullCell`, two half-cells, each a
   :class:`HalfCellSpec`, and a membrane between them, a
-  :class:`MembraneSpec`.
+  :class:`MembraneSpec`, with the flow of the electrolytes from their
+  tanks, a :class:`FlowSpec`.
 
 The package imports from the core of :mod:`sumfem`, and never the other
 way around.
@@ -26,7 +27,7 @@ way around.
 from .charge import ElectrolyteConduction
 from .couple import RedoxCouple
 from .electrolyte import Electrolyte, Ion
-from .full_cell import FullCell, HalfCellSpec, MembraneSpec
+from .full_cell import FlowSpec, FullCell, HalfCellSpec, MembraneSpec
 from .half_cell import RedoxHalfCell
 from .kinetics import (
     ButlerVolmer,
@@ -55,6 +56,7 @@ __all__ = [
     "FullCell",
     "HalfCellSpec",
     "MembraneSpec",
+    "FlowSpec",
     "ButlerVolmer",
     "ElectrodeReaction",
     "ExchangeCurrentButlerVolmer",
