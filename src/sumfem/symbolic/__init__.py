@@ -33,6 +33,7 @@ from .components import (
     JacobianSum,
     Residual,
     ResidualSum,
+    expression_or_parameter,
     input_or_parameter,
 )
 from .constants import BOLTZMANN, FARADAY, GAS_CONSTANT, boltzmann_constant
@@ -77,6 +78,7 @@ __all__ = [
     "Clock",
     "Component",
     "Functional",
+    "expression_or_parameter",
     "input_or_parameter",
     "FunctionalSum",
     "Jacobian",

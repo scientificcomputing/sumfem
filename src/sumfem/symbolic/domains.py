@@ -417,6 +417,34 @@ class Domain(ufl.Mesh):
         """
         return self._interfaces.get(marker)
 
+    def interfaces_of(
+        self, measure: ufl.Measure
+    ) -> tuple[tuple[Subdomain, Subdomain, str], ...]:
+        """The interfaces an interior facet measure of this domain covers.
+
+        See :meth:`interface` and :meth:`interface_sides`.
+
+        Args:
+            measure: An interior facet measure.
+
+        Returns:
+            The two subdomains and the facet marker of each interface the
+            measure covers, ``"+"`` side first. Empty if it covers any
+            facets that are not an interface, e.g. those of a plain
+            :meth:`measure`, or if it is not this domain's.
+        """
+        ids = measure.subdomain_id()
+        if measure.ufl_domain() is not self or measure.integral_type() != (
+            "interior_facet"
+        ):
+            return ()
+        ids = ids if isinstance(ids, tuple) else (ids,)
+        names = {i: name for name, i in self._markers[self.tdim - 1].items()}
+        sides = [self.interface_sides(names.get(i, "")) for i in ids]
+        if any(side is None for side in sides):
+            return ()
+        return tuple(typing.cast(list[tuple[Subdomain, Subdomain, str]], sides))
+
     def __str__(self) -> str:
         return f"<{type(self).__name__} {self._name!r} ({self.cell_name})>"
 

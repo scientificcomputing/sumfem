@@ -56,6 +56,8 @@
 
 .. autofunction:: input_or_parameter
 
+.. autofunction:: expression_or_parameter
+
 .. autoclass:: Residual
    :members:
 
