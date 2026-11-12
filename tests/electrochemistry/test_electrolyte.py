@@ -12,7 +12,10 @@ from sumfem.electrochemistry import (
     MassTransferButlerVolmer,
     NernstPlanck,
     PorousElectrode,
+    Region,
+    TransientNernstPlanck,
 )
+from sumfem.models import Accumulation
 from sumfem.symbolic import Domain, Field, build_system
 
 CONCENTRATION = syu.mol / syu.m**3
@@ -125,6 +128,22 @@ def test_transport_needs_a_transported_ion_of_the_electrolyte(domain):
     stranger = Ion("V2", 2, 2.4e-10, ions[0].field)
     with pytest.raises(ValueError, match="not in"):
         NernstPlanck("V2", stranger, electrolyte, phi_l)
+
+
+def test_transient_transport_is_storage_and_transport(domain):
+    """The balance of an ion is its storage, weighted with the porosity, and
+    its Nernst-Planck transport, and needs a transported ion."""
+    ions = vanadium(domain)
+    electrolyte = Electrolyte("e", domain, ions)
+    _, phi_l = potentials(domain)
+    region = Region(("Electrode",), porosity=0.7)
+    balance = TransientNernstPlanck("V2", ions[0], electrolyte, phi_l, region)
+    storage, transport = balance.components
+    assert [m.name for m in balance.components] == ["V2_storage", "V2_transport"]
+    assert isinstance(storage, Accumulation) and isinstance(transport, NernstPlanck)
+    assert balance.ion is ions[0]
+    with pytest.raises(TypeError, match="electroneutrality"):
+        TransientNernstPlanck("SO4", ions[3], electrolyte, phi_l)
 
 
 def test_a_vanadium_electrode_has_consistent_units(domain):

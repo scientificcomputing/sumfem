@@ -32,6 +32,9 @@
 
 .. autoclass:: NernstPlanck
    :members:
+
+.. autoclass:: TransientNernstPlanck
+   :members:
 ```
 
 ## Kinetics

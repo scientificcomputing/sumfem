@@ -37,7 +37,10 @@ class Region:
 
     @property
     def transport(self) -> ufl.core.expr.Expr | float:
-        """Correction of diffusivities, Bruggeman's: one in free electrolyte."""
+        r"""Correction of diffusivities, Bruggeman's :math:`\varepsilon^b`.
+
+        It is one in free electrolyte, with porosity one.
+        """
         return bruggeman(1.0, self.porosity, self.bruggeman_exponent)
 
 
@@ -163,7 +166,12 @@ class PorousElectrode:
         return self._fiber_diameter
 
     def effective_conductivity(self) -> ufl.core.expr.Expr:
-        """Bruggeman's conductivity of the solid, ``(1 - eps)^1.5 sigma``."""
+        r"""Bruggeman's conductivity of the solid.
+
+        That is :math:`\sigma_\text{eff} = (1 - \varepsilon)^{3/2} \sigma`, with
+        the conductivity :math:`\sigma` of the fibres and the porosity
+        :math:`\varepsilon`.
+        """
         return bruggeman(self._conductivity, 1.0 - self._porosity)
 
     def permeability(self) -> ufl.core.expr.Expr:
