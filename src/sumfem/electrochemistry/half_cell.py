@@ -13,6 +13,10 @@ import dataclasses
 import types
 import typing
 
+from mpi4py import MPI
+
+import dolfinx.fem
+import numpy as np
 import sympy
 import sympy.physics.units as syu
 import ufl
@@ -789,6 +793,34 @@ class RedoxHalfCell:
         reduced = assemble(self._functionals["amount_reduced"])
         oxidized = assemble(self._functionals["amount_oxidized"])
         return reduced / max(reduced + oxidized, 1e-30)
+
+    def minimum_balanced_concentration(self, discretization: Discretization) -> float:
+        """The smallest concentration of the ion given by electroneutrality.
+
+        Nothing keeps that concentration positive. A negative minimum means
+        the electrolyte cannot stay neutral with the computed
+        concentrations, e.g. after a time step that is too long, or because
+        the balanced ion is not abundant enough, see
+        :class:`~sumfem.electrochemistry.Electrolyte`.
+
+        Args:
+            discretization: The discretization of the cell.
+
+        Returns:
+            The minimum over the nodes of the concentrations' space, over all
+            processes.
+        """
+        e = self._electrolyte
+        assert e.balanced is not None
+        space = discretization.function_space(next(iter(self._concentrations.values())))
+        balanced = dolfinx.fem.Function(space)
+        expression = discretization[e.concentration(e.balanced, positive=False)]
+        balanced.interpolate(
+            dolfinx.fem.Expression(expression, space.element.interpolation_points)
+        )
+        owned = space.dofmap.index_map.size_local * space.dofmap.index_map_bs
+        local = balanced.x.array[:owned].min(initial=np.inf)
+        return float(space.mesh.comm.allreduce(local, op=MPI.MIN))
 
     def local_state_of_charge(self) -> ufl.core.expr.Expr:
         """The share of the reduced ion in the couple, ``c_red / (c_red + c_ox)``."""

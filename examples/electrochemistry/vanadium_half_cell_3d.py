@@ -450,7 +450,10 @@ charge = np.array([r[3] for r in records])
 # -
 
 # Charging raises the state of charge and discharging lowers it, and the
-# voltage is lower on charge than on discharge:
+# voltage is lower on charge than on discharge. Sulfate, which follows from
+# electroneutrality, stays positive, see
+# {py:meth}`minimum_balanced_concentration
+# <sumfem.electrochemistry.RedoxHalfCell.minimum_balanced_concentration>`:
 
 # +
 steps = {mode: np.diff(charge[modes == mode]) for mode in ("charge", "discharge")}
@@ -459,6 +462,7 @@ print(f"State of charge at the end: {charge[-1]:.6f}")
 assert np.all(steps["charge"] > 0) and np.all(steps["discharge"] < 0)
 assert voltage[modes == "charge"].mean() < voltage[modes == "discharge"].mean()
 assert np.isfinite(voltage).all()
+assert cell.minimum_balanced_concentration(disc) > 0
 # -
 
 # The voltage and the state of charge through the schedule:

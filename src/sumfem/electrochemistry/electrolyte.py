@@ -74,9 +74,14 @@ class Electrolyte:
     an electrolyte share these parameters.
 
     At most one ion may have no field. Its concentration follows from
-    electroneutrality, ``sum_j z_j c_j = 0``. Without ions, the electrolyte
-    has a uniform composition, and only provides the constants, the
-    temperature and the properties of the solution.
+    electroneutrality, ``sum_j z_j c_j = 0``, see :attr:`balanced`. Nothing
+    keeps that concentration positive, so choose the most abundant ion of
+    the supporting electrolyte, e.g. sulfate in a vanadium electrolyte,
+    never an ion of a reaction, and check its minimum, e.g. with
+    :meth:`~sumfem.electrochemistry.RedoxHalfCell.minimum_balanced_concentration`.
+    Without ions, the electrolyte has a uniform composition, and only
+    provides the constants, the temperature and the properties of the
+    solution.
 
     Args:
         name: Prefix of the parameter names.
@@ -230,6 +235,14 @@ class Electrolyte:
     def ions(self) -> typing.Mapping[str, Ion]:
         """The ions by name, in the given order, as given."""
         return self._ions
+
+    @property
+    def balanced(self) -> str | None:
+        """Name of the ion that follows from electroneutrality, if any."""
+        for ion in self._ions.values():
+            if ion.concentration is None:
+                return ion.name
+        return None
 
     @property
     def F(self) -> Parameter:

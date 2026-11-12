@@ -401,3 +401,17 @@ def test_two_half_cells_share_the_electrolyte_potential_and_water(reference):
     assert {"negative_c_H", "positive_c_H", "c_VO", "c_V2"} <= set(names)
     assert "negative.rate_constant" in system.parameters
     assert "positive_electrolyte.D_H" in system.parameters
+
+
+def test_the_balanced_ion_is_checked_for_its_minimum(reference):
+    """At rest the vanadium cell holds sulfate at the concentration that
+    neutralizes the others, (2 c_V2 + 3 c_V3 + c_H - c_HSO4) / 2."""
+    marked = reference.interval(num_cells=8)
+    domain = Domain.from_mesh("cell", marked.mesh)
+    cell = reference.half_cell(domain)
+    inlet = cell.inlet_conditions("Membrane")
+    disc = discretize([cell.model, *inlet], DomainMaps({domain: marked}))
+    cell.initialize(disc)
+    assert cell.electrolyte.balanced == "SO4"
+    expected = (2 * 300.0 + 3 * 300.0 + 1000.0 - 1000.0) / 2
+    assert cell.minimum_balanced_concentration(disc) == pytest.approx(expected)
