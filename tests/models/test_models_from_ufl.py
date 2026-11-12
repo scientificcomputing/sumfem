@@ -20,6 +20,8 @@ from sumfem.models import (
     BoundaryFlux,
     Brinkman,
     BrinkmanForchheimer,
+    ConservativeAdvection,
+    ConvectiveAdvection,
     Darcy,
     Diffusion,
     DirichletMultiplier,
@@ -146,6 +148,34 @@ def test_boundary_flux_and_outflow(cell, ufl_functionspace, box, compare):
     model = inflow + Outflow("out", c, velocity, markers=("Right",))
     values = [({"plain.q": 2.0}, {})]
     compare(plain, [plain.field], model, [c], box(cell), values)
+
+
+@pytest.mark.parametrize("form", [ConvectiveAdvection, ConservativeAdvection])
+@pytest.mark.parametrize("cell", CELLS)
+def test_advection(cell, form, ufl_functionspace, box, compare):
+    """Advection of a quantity of the field by a velocity that varies in
+    space, in either form, restricted to the cells of a marker.
+    """
+    gdim = ufl.Cell(cell).topological_dimension
+    mesh, V = ufl_functionspace(cell, degree=2)
+    ch, v = ufl.Coefficient(V), ufl.TestFunction(V)
+    xh = ufl.SpatialCoordinate(mesh)
+    velocity = ufl.as_vector([1.0 + i + xh[i] for i in range(gdim)])
+    quantity = ch + ch**2
+    if form is ConservativeAdvection:
+        F = -ufl.inner(quantity * velocity, ufl.grad(v)) * ufl.dx(1)
+    else:
+        F = ufl.dot(ufl.grad(quantity), velocity) * v * ufl.dx(1)
+    plain = UFLResidual(
+        "plain", F, ch, names={DOMAIN: mesh}, markers={"dx": {1: "LeftHalf"}}
+    )
+
+    domain = Domain(DOMAIN, cell)
+    c = Field("c", domain, ("Lagrange", 2))
+    x = ufl.SpatialCoordinate(domain)
+    u = ufl.as_vector([1.0 + i + x[i] for i in range(gdim)])
+    model = form("a", c, u, markers=("LeftHalf",), quantity=c + c**2)
+    compare(plain, [plain.field], model, [c], box(cell))
 
 
 @pytest.mark.parametrize("cell", CELLS)
