@@ -814,7 +814,7 @@ class RedoxHalfCell:
         assert e.balanced is not None
         space = discretization.function_space(next(iter(self._concentrations.values())))
         balanced = dolfinx.fem.Function(space)
-        expression = discretization[e.concentration(e.balanced, positive=False)]
+        expression = discretization[e.concentration(e.balanced)]
         balanced.interpolate(
             dolfinx.fem.Expression(expression, space.element.interpolation_points)
         )
