@@ -190,6 +190,9 @@ class RedoxHalfCell:
             parameter of a flow model to share it.
         viscosity: Dynamic viscosity of the electrolyte, given like the
             density.
+        temperature: The temperature of the electrolyte, an expression, e.g.
+            the field of a heat equation, or the default of its parameter, in
+            K, see :class:`~sumfem.electrochemistry.Electrolyte`.
         degree: Degree of the Lagrange elements of the unknowns.
         name: Prefix of the cell's own parameters, ``"<name>.<parameter>"``,
             and of the names of its models, ``"<name>_<model>"``. The
@@ -300,6 +303,7 @@ class RedoxHalfCell:
         proton_flux: bool = False,
         density: ExpressionOrDefault = 1399.8,
         viscosity: ExpressionOrDefault = 6.963e-3,
+        temperature: ExpressionOrDefault = 298.15,
         degree: int = 1,
         name: str = "cell",
         phi_s: Field | None = None,
@@ -336,7 +340,7 @@ class RedoxHalfCell:
 
         self._create_fields(ions, reservoir, degree, phi_s, phi_l, fields)
         self._electrolyte = self._create_electrolyte(
-            ions, electrolyte_name, density, viscosity
+            ions, electrolyte_name, density, viscosity, temperature
         )
         self._create_parameters(reservoir, fiber_distance)
         self._reaction = self._create_reaction(velocity, mass_transfer)
@@ -392,6 +396,7 @@ class RedoxHalfCell:
         name: str,
         density: ExpressionOrDefault,
         viscosity: ExpressionOrDefault,
+        temperature: ExpressionOrDefault,
     ) -> Electrolyte:
         """Create the electrolyte, with the fields of the transported ions.
 
@@ -403,6 +408,8 @@ class RedoxHalfCell:
                 expression.
             viscosity: Dynamic viscosity of the electrolyte, a value or a
                 shared expression.
+            temperature: Temperature of the electrolyte, a value or an
+                expression.
 
         Returns:
             The electrolyte.
@@ -418,6 +425,7 @@ class RedoxHalfCell:
             ],
             density=density,
             viscosity=viscosity,
+            temperature=temperature,
         )
 
     def _create_parameters(

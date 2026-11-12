@@ -526,38 +526,53 @@ def test_any_flow_plugs_into_the_cell():
 
 
 def test_inputs_can_be_fields_of_other_models():
-    """The properties of the electrodes and the couples may be expressions of
-    the fields of other models: here a temperature, which sets the
-    conductivity of the fibres, an Arrhenius rate constant and a formal
-    potential that changes with it, and a compression, which sets the
-    porosity. Their parameters are then not created, the units are
-    consistent, and a cell at rest starts and stays at the Nernst voltage of
-    that temperature."""
+    """The inputs of the cell may be expressions of the fields of other
+    models: here a temperature, the temperature of the electrolytes and the
+    membrane, which also sets the conductivity of the fibres, an Arrhenius
+    rate constant and a formal potential that changes with it, and a
+    compression, which sets the porosity. The expressions hold parameters
+    with units, so that the units stay consistent. Their own parameters are
+    then not created, and a cell at rest starts and stays at the Nernst
+    voltage of that temperature; the change of the formal potentials, the
+    same on both sides, cancels in it."""
     domain = Domain("cell", "interval", length_scale=4e-3)
     T = Field("T", domain, ("Lagrange", 1), unit=syu.kelvin, scale=300.0)
     strain = Field("strain", domain, ("Lagrange", 1))
-    reference = 298.15 * syu.kelvin
-    slope = 1e-3 * syu.volt / syu.kelvin
-    activation = 4e3 * syu.kelvin
+
+    def create_parameter(name, default, unit=None):
+        """A parameter of the thermal model, with its unit."""
+        return Parameter(f"thermal.{name}", domain, default=default, unit=unit)
+
+    reference = create_parameter("reference", 298.15, syu.kelvin)
+    slope = create_parameter("slope", 1e-3, syu.volt / syu.kelvin)
+    activation = create_parameter("activation", 4e3, syu.kelvin)
+    conductivity = create_parameter("conductivity", 500.0, syu.siemens / syu.m)
     sides = []
-    for spec in (NEGATIVE, POSITIVE):
+    for side, spec in (("negative", NEGATIVE), ("positive", POSITIVE)):
+        k0 = create_parameter(
+            f"{side}_rate", spec.couple.rate_constant, syu.m / syu.second
+        )
+        E0 = create_parameter(
+            f"{side}_potential", spec.couple.formal_potential, syu.volt
+        )
         couple = dataclasses.replace(
             spec.couple,
-            rate_constant=spec.couple.rate_constant
-            * ufl.exp(-activation * (1 / T - 1 / reference)),
-            formal_potential=spec.couple.formal_potential + slope * (T - reference),
-            reactants=None if spec is NEGATIVE else spec.couple.reactants,
-            products=None if spec is NEGATIVE else spec.couple.products,
+            rate_constant=k0 * ufl.exp(-activation * (1 / T - 1 / reference)),
+            formal_potential=E0 + slope * (T - reference),
+            reactants=None if side == "negative" else spec.couple.reactants,
+            products=None if side == "negative" else spec.couple.products,
         )
         sides.append(
             dataclasses.replace(
                 spec,
                 couple=couple,
                 porosity=0.68 * (1 - 0.1 * strain),
-                conductivity=500.0 * syu.siemens / syu.m * (T / reference),
+                conductivity=conductivity * (T / reference),
+                temperature=T,
             )
         )
-    cell = FullCell(domain, *sides, membrane=MEMBRANE)
+    membrane = dataclasses.replace(MEMBRANE, temperature=T)
+    cell = FullCell(domain, *sides, membrane=membrane)
     heat = Diffusion(
         "heat",
         T,
@@ -568,6 +583,7 @@ def test_inputs_can_be_fields_of_other_models():
     system = build_system(model, check_units=True)
     assert "negative_electrode.porosity" not in system.parameters
     assert "positive.rate_constant" not in system.parameters
+    assert "negative_electrolyte.T" not in system.parameters
     assert {T, strain} <= set(system.unknowns)
 
     disc = discretize(
@@ -590,8 +606,7 @@ def test_inputs_can_be_fields_of_other_models():
         time_scale=1.0,
     )
     RT_F = 8.314462618 * temperature / 96485.33212
-    shift = 2 * 1e-3 * (temperature - 298.15)
-    expected = 1.004 + 0.255 + shift + 2 * RT_F * np.log(27.0 / 1053.0)
+    expected = 1.004 + 0.255 + 2 * RT_F * np.log(27.0 / 1053.0)
     assert cell.voltage(disc) == pytest.approx(expected, rel=1e-9)
     simulation.run(num_steps=1)
     assert cell.voltage(disc) == pytest.approx(expected, rel=1e-8)

@@ -260,7 +260,7 @@ class ProtonExchangeMembrane(ResidualSum):
         electrokinetic_permeability: ExpressionOrDefault = None,
         hydraulic_permeability: ExpressionOrDefault = None,
         viscosity: ExpressionOrDefault = None,
-        temperature: ufl.core.expr.Expr | float = 298.15,
+        temperature: ExpressionOrDefault = 298.15,
     ):
         domain = potential.domain
         self._potential = potential

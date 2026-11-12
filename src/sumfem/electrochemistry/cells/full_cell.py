@@ -201,6 +201,7 @@ class FullCell:
             electrokinetic_permeability=membrane.electrokinetic_permeability,
             hydraulic_permeability=membrane.hydraulic_permeability,
             viscosity=membrane.viscosity,
+            temperature=membrane.temperature,
         )
         self._collector_conductivity = expression_or_parameter(
             f"{name}.collector_conductivity",
@@ -392,6 +393,7 @@ class FullCell:
             outlet=() if flow is None else (f"{prefix}Outlet",),
             density=density,
             viscosity=viscosity,
+            temperature=spec.temperature,
             name=side,
             phi_s=phi_s,
             phi_l=self._phi_l,

@@ -64,6 +64,8 @@ class HalfCellSpec:
         density: The density of the electrolyte, in kg/m^3 or with units.
         viscosity: The dynamic viscosity of the electrolyte, in Pa s or with
             units, which the flow and the mass transfer share.
+        temperature: The temperature of the electrolyte, in K, e.g. the field
+            of a heat equation.
 
     Raises:
         ValueError: If the side does not transport protons.
@@ -80,6 +82,7 @@ class HalfCellSpec:
     kozeny_carman_constant: ExpressionOrDefault = None
     density: ExpressionOrDefault = 1399.8
     viscosity: ExpressionOrDefault = 6.963e-3
+    temperature: ExpressionOrDefault = 298.15
 
     def __post_init__(self) -> None:
         if PROTONS not in self.reservoir:
@@ -107,6 +110,8 @@ class MembraneSpec:
             m^2.
         hydraulic_permeability: The hydraulic permeability, in m^2.
         viscosity: The viscosity of the water in the membrane, in Pa s.
+        temperature: The temperature of the membrane, in K, e.g. the field of
+            a heat equation.
     """
 
     fixed_charge: ExpressionOrDefault = None
@@ -115,6 +120,7 @@ class MembraneSpec:
     electrokinetic_permeability: ExpressionOrDefault = None
     hydraulic_permeability: ExpressionOrDefault = None
     viscosity: ExpressionOrDefault = None
+    temperature: ExpressionOrDefault = 298.15
 
 
 @dataclasses.dataclass(frozen=True)
