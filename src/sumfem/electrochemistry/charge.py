@@ -13,13 +13,26 @@ __all__ = ["ElectrolyteConduction"]
 
 
 class ElectrolyteConduction(Residual):
-    """Charge conservation in the electrolyte, ``-(i, grad(v))``.
+    r"""Charge conservation in the electrolyte, :math:`-(\mathbf{i}_l, \nabla v)`.
 
-    The current density ``i`` of the electrolyte,
+    The current density of the electrolyte,
     :meth:`~sumfem.electrochemistry.electrolyte.Electrolyte.current_density`,
-    includes migration with the concentration-dependent conductivity and
-    diffusion of every ion. Diffusivities take the transport correction of
-    the region.
+    carries charge by migration, with the concentration-dependent
+    conductivity :math:`\kappa_\text{eff}`, and by diffusion of every ion
+    :math:`k`:
+
+    .. math::
+       :label: electrolyte-current
+
+       \begin{aligned}
+         \mathbf{i}_l &= -\kappa_\text{eff} \nabla \phi
+           - F \sum_k z_k D_{k,\text{eff}} \nabla c_k, \\
+         \kappa_\text{eff} &= \frac{F^2}{R T}
+           \sum_k z_k^2 D_{k,\text{eff}} c_k,
+       \end{aligned}
+
+    with the diffusivities corrected for the region as in
+    :eq:`nernst-planck-flux`.
 
     Args:
         name: Name of the model.

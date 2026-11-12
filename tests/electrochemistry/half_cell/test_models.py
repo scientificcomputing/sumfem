@@ -116,8 +116,8 @@ def test_half_cells_have_consistent_units(reference):
     )
     assert_consistent(cell.model)
     names = [m.name for m in cell.model.components]
-    assert "cell_transport_V2_channels" in names
-    assert "cell_storage_H_channels" in names
+    assert "cell_V2_channels_transport" in names
+    assert "cell_H_channels_storage" in names
     assert "cell_electrolyte_channels" in names
 
 

@@ -259,20 +259,30 @@ class ExchangeCurrentButlerVolmer(ElectrodeReaction):
 
 
 class ButlerVolmer(ElectrodeReaction):
-    """Butler-Volmer kinetics of a redox couple of an electrolyte.
+    r"""Butler-Volmer kinetics of a redox couple of an electrolyte.
 
     The Butler-Volmer equation, see :func:`~sumfem.models.butler_volmer`,
     with an exchange current density from the concentrations of the couple.
     The interfacial current density is
 
-        ``i = n F (k_a c_red - k_c c_ox)``,
-        ``k_a = k0 exp(alpha_a n F eta / (R T))``,
-        ``k_c = k0 exp(-alpha_c n F eta / (R T))``,
+    .. math::
+       :label: butler-volmer-couple
 
-    with ``eta = phi_s - phi_l - E0`` relative to the formal potential
-    ``E0``, and the concentrations at the electrode surface, by default the
-    positive parts of the bulk concentrations. The reduced and oxidized ions
-    are ions in the electrolyte, given by name.
+       \begin{aligned}
+         i &= n F \left( k_a c_\text{red}^s - k_c c_\text{ox}^s \right), \\
+         k_a &= k_0 e^{\alpha_a n F \eta / (R T)}, \\
+         k_c &= k_0 e^{-\alpha_c n F \eta / (R T)}, \\
+         \eta &= \phi_s - \phi_l - E_0,
+       \end{aligned}
+
+    with the standard rate constant :math:`k_0`, the transfer coefficients
+    :math:`\alpha_a` and :math:`\alpha_c`, the formal potential :math:`E_0`,
+    and the concentrations :math:`c_\text{red}^s` and :math:`c_\text{ox}^s`
+    of the reduced and oxidized ion at the electrode surface. These are, by
+    default, the smooth positive parts of the bulk concentrations,
+    :math:`c^+ = (c + \sqrt{c^2 + c_\text{floor}^2}) / 2`, see
+    :meth:`~sumfem.electrochemistry.electrolyte.Electrolyte.positive_part`.
+    The reduced and oxidized ions are ions in the electrolyte, given by name.
 
     Subclasses change the kinetics by overriding
     :meth:`surface_concentrations`, :meth:`rate_constants` or
@@ -476,14 +486,40 @@ class ButlerVolmer(ElectrodeReaction):
 
 
 class MassTransferButlerVolmer(ButlerVolmer):
-    """Butler-Volmer kinetics limited by mass transfer to the fibers.
+    r"""Butler-Volmer kinetics limited by mass transfer to the fibers.
 
-    The surface concentrations balance the reaction with mass transfer
-    ``k_m (c - c_s)`` from the bulk. The mass-transfer coefficient of each
-    ion is ``k_m = Sh D / d`` with the Sherwood number ``Sh = a Re^b`` and
-    the Reynolds number ``Re = rho |u| d / mu`` of the flow past fibers of
-    diameter ``d``. ``D`` is the diffusivity in free electrolyte. The
-    defaults ``a = 7`` and ``b = 0.4`` are the correlation of `Krishnamurthy
+    The surface concentrations of :eq:`butler-volmer-couple` are those at
+    which mass transfer from the bulk, with the coefficients
+    :math:`m_\text{red}` and :math:`m_\text{ox}`, balances the reaction:
+
+    .. math::
+       :label: mass-transfer-balance
+
+       \begin{aligned}
+         m_\text{red} \left( c_\text{red}^+ - c_\text{red}^s \right)
+           &= k_a c_\text{red}^s - k_c c_\text{ox}^s, \\
+         m_\text{ox} \left( c_\text{ox}^s - c_\text{ox}^+ \right)
+           &= k_a c_\text{red}^s - k_c c_\text{ox}^s,
+       \end{aligned}
+
+    two linear equations, solved in closed form. Each coefficient has a
+    small floor added. The coefficients follow from the Sherwood number
+    :math:`\mathrm{Sh} = a \, \mathrm{Re}^b` of the flow past fibers of
+    diameter :math:`d`:
+
+    .. math::
+       :label: mass-transfer-correlation
+
+       \begin{aligned}
+         m_\text{red} &= \mathrm{Sh} \frac{D_\text{red}}{d}, \\
+         m_\text{ox} &= \mathrm{Sh} \frac{D_\text{ox}}{d}, \\
+         \mathrm{Re} &= \frac{\rho |\mathbf{u}| d}{\mu},
+       \end{aligned}
+
+    with the diffusivities :math:`D_\text{red}` and :math:`D_\text{ox}` of
+    the reduced and oxidized ion in free electrolyte, and the density
+    :math:`\rho` and viscosity :math:`\mu` of the electrolyte. The
+    defaults :math:`a = 7` and :math:`b = 0.4` are the correlation of `Krishnamurthy
     et al., 2011 <https://doi.org/10.1016/j.jpowsour.2011.08.024>`_, and the
     surface concentrations those of equation 20 of `Aghabarari et al., 2026
     <https://arxiv.org/abs/2610.01840>`_.
@@ -669,9 +705,20 @@ def _balanced_surface(
 ) -> tuple[ufl.core.expr.Expr, ufl.core.expr.Expr]:
     """Surface concentrations where mass transfer balances the reaction.
 
-    The solution of ``m_red (c_red - s_red) = k_a s_red - k_c s_ox`` and
+    Solves ``m_red (c_red - s_red) = k_a s_red - k_c s_ox`` and
     ``m_ox (c_ox - s_ox) = -(k_a s_red - k_c s_ox)``, see equation 20 of
     `Aghabarari et al., 2026 <https://arxiv.org/abs/2610.01840>`_.
+
+    Args:
+        k_a: Anodic rate constant.
+        k_c: Cathodic rate constant.
+        m_red: Mass-transfer coefficient of the reduced ion.
+        m_ox: Mass-transfer coefficient of the oxidized ion.
+        c_red: Bulk concentration of the reduced ion.
+        c_ox: Bulk concentration of the oxidized ion.
+
+    Returns:
+        The surface concentrations ``s_red`` and ``s_ox``.
     """
     denominator = 1.0 + k_a / m_red + k_c / m_ox
     surface_ox = ((1.0 + k_a / m_red) * c_ox + k_a / m_ox * c_red) / denominator
@@ -680,13 +727,22 @@ def _balanced_surface(
 
 
 class PistonVelocityButlerVolmer(ButlerVolmer):
-    """Butler-Volmer kinetics limited by diffusion between the fibres.
+    r"""Butler-Volmer kinetics limited by diffusion between the fibres.
 
-    The surface concentrations balance the reaction with mass transfer
-    ``gamma (c - c_s)`` from the bulk, with the piston velocity
-    ``gamma = D / delta`` of each ion, its diffusivity in free electrolyte
-    over the mean distance ``delta`` between the fibres, see equations 23
-    and 24 of `Shah et al., 2008
+    The surface concentrations balance the reaction with mass transfer as in
+    :eq:`mass-transfer-balance`, with the piston velocities
+
+    .. math::
+       :label: piston-velocity
+
+       \begin{aligned}
+         m_\text{red} &= \frac{D_\text{red}}{\delta}, \\
+         m_\text{ox} &= \frac{D_\text{ox}}{\delta},
+       \end{aligned}
+
+    the diffusivities of the reduced and oxidized ion in free electrolyte
+    over the mean distance :math:`\delta` between the fibres, see equations
+    23 and 24 of `Shah et al., 2008
     <https://doi.org/10.1016/j.electacta.2008.05.067>`_. Unlike
     :class:`MassTransferButlerVolmer`, the transfer does not depend on the
     flow.

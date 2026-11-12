@@ -18,7 +18,7 @@ import sympy.physics.units as syu
 import ufl
 
 from sumfem.discrete import Discretization
-from sumfem.models import Accumulation, BoundaryFlux, Conduction, Outflow
+from sumfem.models import BoundaryFlux, Conduction, Outflow
 from sumfem.symbolic import (
     DirichletBC,
     Domain,
@@ -37,105 +37,163 @@ from .kinetics import (
     PistonVelocityButlerVolmer,
 )
 from .porous import PorousElectrode, Region
-from .transport import NernstPlanck
+from .transport import TransientNernstPlanck
 
 __all__ = ["RedoxHalfCell"]
 
 
 class RedoxHalfCell:
-    """A half-cell of a redox flow battery, of a couple of dissolved ions.
+    r"""A half-cell of a redox flow battery, of a couple of dissolved ions.
 
     The macro-homogeneous porous-electrode model of RFBniCS, `Aghabarari et
     al., 2026 <https://arxiv.org/abs/2610.01840>`_, Section II, for any
     couple, electrolyte and sign of the half-cell.
 
-    The unknowns are the potentials ``phi_s`` of the solid and ``phi_l`` of
-    the electrolyte, in V, and the concentration ``c_<ion>`` of every ion
-    with a reservoir concentration, in mol/m^3. The one ion without follows
-    from electroneutrality. In the porous electrode, the reaction of the
-    :class:`~sumfem.electrochemistry.RedoxCouple` follows Butler-Volmer
-    kinetics, limited by mass transfer to the fibres when there is flow or a
-    fibre distance. In free channels the electrolyte is not corrected for
-    porosity, and there is no reaction or solid phase.
+    The unknowns are the potential :math:`\phi_s` of the solid and
+    :math:`\phi_l` of the electrolyte, and the concentration :math:`c_k` of
+    every ion with a reservoir concentration. In the porous electrode, of
+    porosity :math:`\varepsilon` and specific area :math:`a`, charge is
+    conserved in the solid and the electrolyte, which exchange the current
+    :math:`a i` of the reaction, and each ion is stored, transported and
+    produced:
+
+    .. math::
+       :label: redox-half-cell
+
+       \begin{aligned}
+         -\nabla \cdot (\sigma_\text{eff} \nabla \phi_s) + a i &= 0, \\
+         \nabla \cdot \mathbf{i}_l - a i &= 0, \\
+         \varepsilon \frac{\partial c_k}{\partial t}
+           + \nabla \cdot \mathbf{N}_k &= \nu_k \frac{a i}{n F}, \\
+         \sum_k z_k c_k &= 0.
+       \end{aligned}
+
+    The terms are those of the components of the cell:
+
+    - :math:`\sigma_\text{eff}`, the effective conductivity of the solid,
+      :meth:`PorousElectrode.effective_conductivity
+      <sumfem.electrochemistry.PorousElectrode.effective_conductivity>`;
+    - :math:`\mathbf{i}_l`, the current density of the electrolyte,
+      :eq:`electrolyte-current`;
+    - :math:`\mathbf{N}_k`, the Nernst-Planck flux of the ion of charge
+      :math:`z_k`, :eq:`nernst-planck-flux`, with the superficial velocity
+      :math:`\mathbf{u}` of the electrolyte;
+    - :math:`i`, the interfacial current density of the couple,
+      :eq:`butler-volmer-couple`, at surface concentrations limited by mass
+      transfer, :eq:`mass-transfer-balance`, with flow or a fibre distance;
+    - :math:`\nu_k` and :math:`n`, the coefficient of the ion in the
+      reaction of the couple, negative for a reactant, positive for a
+      product and zero for an ion that takes no part, and the number of
+      electrons, see :class:`~sumfem.electrochemistry.RedoxCouple`.
+
+    The one ion without a reservoir concentration follows from
+    electroneutrality, the last equation. In free channels,
+    :math:`\varepsilon = 1` and there is no reaction or solid.
+
+    The cell is galvanostatic, with the current density :math:`j` of the
+    cell through the membrane, positive on discharge. On discharge the
+    couple is oxidized in the negative half-cell, :math:`s = 1`, and reduced
+    in the positive one, :math:`s = -1`. With the outward normal
+    :math:`\mathbf{n}`, the current enters the solid at the current
+    collector and leaves the electrolyte at the membrane,
+
+    .. math::
+       :label: redox-half-cell-boundary
+
+       \begin{aligned}
+         \sigma_{\text{eff}} \nabla \phi_s \cdot \mathbf{n} &= s j r
+           && \text{at the current collector}, \\
+         \mathbf{i}_l \cdot \mathbf{n} &= s j
+           && \text{at the membrane}, \\
+         \mathbf{N}_\text{H} \cdot \mathbf{n} &= \frac{s j}{z_\text{H} F}
+           && \text{at the membrane, with a proton flux}, \\
+         (\mathbf{N}_k - \mathbf{u} c_k) \cdot \mathbf{n} &= 0
+           && \text{at an outlet},
+       \end{aligned}
+
+    where the ratio :math:`r` of the membrane area to the collector area
+    makes the total currents equal, see :meth:`balance_currents`. Other
+    boundaries carry no flux.
 
     The model, :attr:`model`, is the sum of:
 
-    - ``"<name>_solid"``: Ohmic conduction in the solid,
-      :class:`~sumfem.models.Conduction` with Bruggeman's effective
-      conductivity of the electrode;
-    - ``"<name>_reaction"``: the kinetics of the couple,
+    - ``"<name>_solid"``: the first equation of :eq:`redox-half-cell`
+      without the reaction,
+      :class:`~sumfem.models.Conduction`;
+    - ``"<name>_reaction"``: the kinetics :eq:`butler-volmer-couple`, with
+      :eq:`mass-transfer-balance` under mass transfer,
       :class:`~sumfem.electrochemistry.ButlerVolmer`,
       :class:`~sumfem.electrochemistry.MassTransferButlerVolmer` with mass
       transfer, or :class:`~sumfem.electrochemistry.PistonVelocityButlerVolmer`
-      with a fibre distance, which moves the current between the phases and
-      consumes and produces the ions of the reaction;
+      with a fibre distance, which adds the reaction to
+      :eq:`redox-half-cell`;
     - with collector and membrane markers, ``"<name>_collector_current"``
-      and ``"<name>_membrane_current"``: the current of the cell into the
-      solid and out of the electrolyte, :class:`~sumfem.models.BoundaryFlux`;
+      and ``"<name>_membrane_current"``: the first two conditions of
+      :eq:`redox-half-cell-boundary`, :class:`~sumfem.models.BoundaryFlux`;
     - for the electrode's pores and, with a suffix ``"_channels"``, the free
-      channels: charge conservation in the electrolyte,
-      :class:`~sumfem.electrochemistry.ElectrolyteConduction`, and for every
-      transported ion its storage, :class:`~sumfem.models.Accumulation`
-      weighted with the porosity, and its transport,
-      :class:`~sumfem.electrochemistry.NernstPlanck`, named
-      ``"<name>_storage_<ion>"`` and ``"<name>_transport_<ion>"``;
-    - with an outlet, ``"<name>_outflow_<ion>"``: advection out of the cell,
+      channels: the charge in the electrolyte,
+      :class:`~sumfem.electrochemistry.ElectrolyteConduction`, and the
+      balance :eq:`nernst-planck-balance` of every ion,
+      :class:`~sumfem.electrochemistry.TransientNernstPlanck`, named
+      ``"<name>_<ion>"``, whose summands are ``"<name>_<ion>_storage"`` and
+      ``"<name>_<ion>_transport"``;
+    - with an outlet, ``"<name>_outflow_<ion>"``: the outlet condition,
       :class:`~sumfem.models.Outflow`;
-    - with a proton flux, ``"<name>_proton_flux"``: the membrane current
-      carried by protons, a :class:`~sumfem.models.BoundaryFlux` of the ion
+    - with a proton flux, ``"<name>_proton_flux"``: the proton condition at
+      the membrane, a :class:`~sumfem.models.BoundaryFlux` of the ion
       ``"H"``.
-
-    The cell is galvanostatic: the parameter ``"<name>.current"`` is the
-    current density through the membrane, in A/m^2, positive on discharge.
-    On discharge the couple is oxidized in the negative half-cell and
-    reduced in the positive one, so the current enters the solid at the
-    current collector of the first, and leaves it at that of the second.
-    The current collector carries the current density ``current *
-    area_ratio``, so that the total currents match when the two areas
-    differ.
 
     Args:
         domain: The domain of the cell.
-        ions: The ions of the electrolyte, without fields: the cell creates
+        ions: The ions of the electrolyte, with their charges :math:`z_k`
+            and diffusivities :math:`D_k`, without fields: the cell creates
             the field of every ion that has a reservoir concentration.
         reservoir: The concentration of each transported ion in the
             reservoir, in mol/m^3 or a quantity with units, the default of
             the parameter ``"<name>.c0_<ion>"``.
-        couple: The redox couple and its reaction. Its parameters are those
-            of the cell: ``"<name>.rate_constant"``,
-            ``"<name>.formal_potential"``, ``"<name>.anodic_transfer"`` and
-            ``"<name>.cathodic_transfer"``.
-        electrode: The porous electrode.
+        couple: The redox couple and its reaction: the coefficients
+            :math:`\nu_k`, :math:`n` and :math:`s`, and the kinetics
+            :eq:`butler-volmer-couple`, whose parameters are those of the
+            cell: ``"<name>.rate_constant"`` :math:`k_0`,
+            ``"<name>.formal_potential"`` :math:`E_0`,
+            ``"<name>.anodic_transfer"`` :math:`\alpha_a` and
+            ``"<name>.cathodic_transfer"`` :math:`\alpha_c`.
+        electrode: The porous electrode: :math:`\varepsilon`, :math:`a` and
+            :math:`\sigma`.
         channels: Cell markers of free channels. Empty for none.
-        velocity: Superficial velocity of the electrolyte, or ``None``
+        velocity: The superficial velocity :math:`\mathbf{u}`, or ``None``
             without flow.
         mass_transfer: Limit the kinetics by mass transfer to the fibres,
-            which needs a velocity. Defaults to whether there is one.
-        fiber_distance: Mean distance between the fibres, in m or with
-            units. Limits the kinetics by the piston velocities of
-            :class:`~sumfem.electrochemistry.PistonVelocityButlerVolmer`
-            instead, with or without flow.
+            :eq:`mass-transfer-balance`, with the coefficients of the flow's
+            correlation, :eq:`mass-transfer-correlation`, which needs a
+            velocity. Defaults to whether there is one.
+        fiber_distance: The mean distance :math:`\delta` between the
+            fibres, in m or with units. Limits the kinetics by
+            :eq:`mass-transfer-balance` with the piston velocities,
+            :eq:`piston-velocity`, instead, with or without flow.
         collector: Facet markers of the current collector, or ``None`` for
             a cell whose collector is resolved, e.g. in a full cell.
         membrane: Facet markers of the membrane, or ``None`` for a cell
             whose membrane is resolved.
-        outlet: Facet markers of an outlet, through which ions leave by
-            advection. Empty for none.
+        outlet: Facet markers of an outlet. Empty for none.
         proton_flux: Carry the membrane current by protons, the ion ``"H"``,
-            through the membrane.
-        density: Density of the electrolyte, see
+            through the membrane, the third condition of
+            :eq:`redox-half-cell-boundary`.
+        density: Density of the electrolyte, for the mass transfer, see
             :class:`~sumfem.electrochemistry.Electrolyte`. Pass the
             parameter of a flow model to share it.
         viscosity: Dynamic viscosity of the electrolyte, given like the
             density.
         degree: Degree of the Lagrange elements of the unknowns.
         name: Prefix of the cell's own parameters, ``"<name>.<parameter>"``,
-            and of the names of its models, ``"<name>_<model>"``.
-        phi_s: The potential of the solid, if it exists, e.g. over the
-            electrode and its current collector. Created on the domain
-            otherwise.
-        phi_l: The potential of the electrolyte, if it exists, e.g. over the
-            electrodes and the membrane of a full cell.
+            and of the names of its models, ``"<name>_<model>"``. The
+            current density :math:`j` is the parameter ``"<name>.current"``,
+            in A/m^2, and the area ratio :math:`r` ``"<name>.area_ratio"``.
+        phi_s: The potential :math:`\phi_s` of the solid, if it exists, e.g.
+            over the electrode and its current collector. Created on the
+            domain otherwise.
+        phi_l: The potential :math:`\phi_l` of the electrolyte, if it exists,
+            e.g. over the electrodes and the membrane of a full cell.
         fields: Existing fields of transported ions, by name, e.g. of water
             shared with a membrane. The others are created on the domain.
         electrolyte_name: Prefix of the parameters of the electrolyte, see
@@ -189,6 +247,19 @@ class RedoxHalfCell:
 
     _formal_potential: Parameter
     """Formal potential of the couple."""
+
+    _rate_constant: Parameter
+    """Standard rate constant of the couple."""
+
+    _anodic_transfer: Parameter
+    """Anodic transfer coefficient of the couple."""
+
+    _cathodic_transfer: Parameter
+    """Cathodic transfer coefficient of the couple."""
+
+    _fiber_distance: Parameter | None
+    """Mean distance between the fibres, if the piston velocities limit the
+    kinetics."""
 
     _reaction: ButlerVolmer
     """The reaction in the electrode."""
@@ -261,8 +332,8 @@ class RedoxHalfCell:
         self._electrolyte = self._create_electrolyte(
             ions, electrolyte_name, density, viscosity
         )
-        self._create_parameters(reservoir)
-        self._reaction = self._create_reaction(velocity, mass_transfer, fiber_distance)
+        self._create_parameters(reservoir, fiber_distance)
+        self._reaction = self._create_reaction(velocity, mass_transfer)
         self._model = ResidualSum(
             self._create_models(velocity, outlet, proton_flux), name=name
         )
@@ -277,11 +348,22 @@ class RedoxHalfCell:
         phi_l: Field | None,
         fields: typing.Mapping[str, Field] | None,
     ) -> None:
-        """The unknowns: the potentials, and the concentration of every ion
-        with a reservoir concentration. Existing fields, e.g. shared with a
-        membrane, are used as given. A concentration is of the order of a mole
-        per litre, its scale for the dimensional analysis and the scaled
-        equations."""
+        """Create the unknowns of the cell.
+
+        Concentrations get the scale of a mole per litre, for the
+        dimensional analysis and the scaled equations.
+
+        Args:
+            ions: The ions of the electrolyte.
+            reservoir: The reservoir concentrations. Their ions are the
+                transported ones, each with a field; the one ion without
+                follows from electroneutrality.
+            degree: Degree of the Lagrange elements of new fields.
+            phi_s: The potential of the solid, or ``None`` to create it.
+            phi_l: The potential of the electrolyte, or ``None`` to create it.
+            fields: Existing concentration fields, by ion name, used as
+                given.
+        """
         domain = self._domain
         element = ("Lagrange", degree)
         existing = dict(fields or {})
@@ -305,10 +387,20 @@ class RedoxHalfCell:
         density: ufl.core.expr.Expr | float,
         viscosity: ufl.core.expr.Expr | float,
     ) -> Electrolyte:
-        """The electrolyte, with the field of every transported ion. The ion
-        without a reservoir concentration, and so without a field, follows
-        from electroneutrality. Its density and viscosity enter the mass
-        transfer, and may be shared with a model of the flow."""
+        """Create the electrolyte, with the fields of the transported ions.
+
+        Args:
+            ions: The ions of the electrolyte. The one without a field
+                follows from electroneutrality.
+            name: Prefix of the electrolyte's parameters.
+            density: Density of the electrolyte, a value or a shared
+                expression.
+            viscosity: Dynamic viscosity of the electrolyte, a value or a
+                shared expression.
+
+        Returns:
+            The electrolyte.
+        """
         return Electrolyte(
             name,
             self._domain,
@@ -323,14 +415,25 @@ class RedoxHalfCell:
         )
 
     def _create_parameters(
-        self, reservoir: typing.Mapping[str, float | sympy.Expr]
+        self,
+        reservoir: typing.Mapping[str, float | sympy.Expr],
+        fiber_distance: float | sympy.Expr | None,
     ) -> None:
-        """The parameters of the cell: the reservoir concentrations, the
-        initial state and the values of the conditions at an inlet; the
-        current density through the membrane, and the ratio of the areas
-        that makes the current through the collector equal, see
-        :meth:`balance_currents`; and the formal potential of the couple."""
+        """Create the parameters of the cell.
+
+        These are the reservoir concentrations, the current density, the
+        area ratio, the kinetic parameters of the couple, and the fibre
+        distance if one is given.
+
+        Args:
+            reservoir: The default reservoir concentration of each
+                transported ion.
+            fiber_distance: The default mean distance between the fibres, or
+                ``None`` for kinetics without piston velocities, which then
+                has no such parameter.
+        """
         domain, name, couple = self._domain, self._name, self._couple
+        pair = f"{couple.reduced}/{couple.oxidized}"
         self._inlet = types.MappingProxyType(
             {
                 ion: Parameter(
@@ -361,43 +464,62 @@ class RedoxHalfCell:
             domain,
             default=couple.formal_potential,
             unit=syu.volt,
-            doc=f"Formal potential of {couple.reduced}/{couple.oxidized}",
+            doc=f"Formal potential of {pair}",
+        )
+        self._rate_constant = Parameter(
+            f"{name}.rate_constant",
+            domain,
+            default=couple.rate_constant,
+            unit=syu.m / syu.second,
+            doc=f"Standard rate constant of {pair}",
+        )
+        self._anodic_transfer = Parameter(
+            f"{name}.anodic_transfer",
+            domain,
+            default=couple.anodic_transfer,
+            doc=f"Anodic transfer coefficient of {pair}",
+        )
+        self._cathodic_transfer = Parameter(
+            f"{name}.cathodic_transfer",
+            domain,
+            default=couple.cathodic_transfer,
+            doc=f"Cathodic transfer coefficient of {pair}",
+        )
+        self._fiber_distance = (
+            None
+            if fiber_distance is None
+            else Parameter(
+                f"{name}.fiber_distance",
+                domain,
+                default=fiber_distance,
+                unit=syu.m,
+                doc="Mean distance between the fibres",
+            )
         )
 
     def _create_reaction(
-        self,
-        velocity: ufl.core.expr.Expr | None,
-        mass_transfer: bool,
-        fiber_distance: float | sympy.Expr | None,
+        self, velocity: ufl.core.expr.Expr | None, mass_transfer: bool
     ) -> ButlerVolmer:
-        """The reaction in the electrode: Butler-Volmer at the concentrations
-        of the pores, or at the surface of the fibres with mass transfer, by
-        the flow's correlation or by diffusion between the fibres. Its
-        parameters are those of the cell."""
-        domain, name, couple = self._domain, self._name, self._couple
-        pair = f"{couple.reduced}/{couple.oxidized}"
+        """Create the reaction in the electrode, from the cell's parameters.
+
+        Args:
+            velocity: The superficial velocity, or ``None`` without flow.
+            mass_transfer: Limit the kinetics by the flow's mass-transfer
+                correlation, unless the cell has a fibre distance.
+
+        Returns:
+            The reaction: :class:`~sumfem.electrochemistry.PistonVelocityButlerVolmer`
+            with a fibre distance, else
+            :class:`~sumfem.electrochemistry.MassTransferButlerVolmer` with
+            mass transfer, else :class:`~sumfem.electrochemistry.ButlerVolmer`.
+        """
+        name, couple = self._name, self._couple
         common: dict[str, typing.Any] = dict(
             specific_area=self._electrode.specific_area,
             formal_potential=self._formal_potential,
-            rate_constant=Parameter(
-                f"{name}.rate_constant",
-                domain,
-                default=couple.rate_constant,
-                unit=syu.m / syu.second,
-                doc=f"Standard rate constant of {pair}",
-            ),
-            anodic_transfer=Parameter(
-                f"{name}.anodic_transfer",
-                domain,
-                default=couple.anodic_transfer,
-                doc=f"Anodic transfer coefficient of {pair}",
-            ),
-            cathodic_transfer=Parameter(
-                f"{name}.cathodic_transfer",
-                domain,
-                default=couple.cathodic_transfer,
-                doc=f"Cathodic transfer coefficient of {pair}",
-            ),
+            rate_constant=self._rate_constant,
+            anodic_transfer=self._anodic_transfer,
+            cathodic_transfer=self._cathodic_transfer,
             electrons=couple.electrons,
             markers=self._electrode.markers,
             reactants=couple.reactants,
@@ -411,16 +533,9 @@ class RedoxHalfCell:
             couple.reduced,
             couple.oxidized,
         )
-        if fiber_distance is not None:
-            distance = Parameter(
-                f"{name}.fiber_distance",
-                domain,
-                default=fiber_distance,
-                unit=syu.m,
-                doc="Mean distance between the fibres",
-            )
+        if self._fiber_distance is not None:
             return PistonVelocityButlerVolmer(
-                *arguments, fiber_distance=distance, **common
+                *arguments, fiber_distance=self._fiber_distance, **common
             )
         if mass_transfer:
             assert velocity is not None
@@ -438,7 +553,16 @@ class RedoxHalfCell:
         outlet: tuple[str, ...],
         proton_flux: bool,
     ) -> list[Residual]:
-        """The models of the cell, see the class documentation."""
+        """Create the models of the cell, listed in the class documentation.
+
+        Args:
+            velocity: The superficial velocity, or ``None`` without flow.
+            outlet: Facet markers of the outlet. Empty for none.
+            proton_flux: Carry the membrane current by protons.
+
+        Returns:
+            The models, to be summed.
+        """
         name, e = self._name, self._electrolyte
         # The current into the solid at the collector, and out of the
         # electrolyte at the membrane, on discharge. Oxidation on discharge
@@ -480,18 +604,10 @@ class RedoxHalfCell:
                     f"{name}_electrolyte{suffix}", self._phi_l, e, region
                 )
             )
-            for ion, c in self._concentrations.items():
+            for ion in self._concentrations:
                 models.append(
-                    Accumulation(
-                        f"{name}_storage_{ion}{suffix}",
-                        c,
-                        weight=region.porosity,
-                        markers=region.markers,
-                    )
-                )
-                models.append(
-                    NernstPlanck(
-                        f"{name}_transport_{ion}{suffix}",
+                    TransientNernstPlanck(
+                        f"{name}_{ion}{suffix}",
                         e[ion],
                         e,
                         self._phi_l,
@@ -519,10 +635,13 @@ class RedoxHalfCell:
         return models
 
     def _create_functionals(self) -> types.MappingProxyType[str, ufl.Form]:
-        """The integrals of the diagnostics: the areas and mean potentials of
-        the collector and the membrane, for the voltage, and the amounts of
-        the couple in the electrolyte of every region, for the state of
-        charge."""
+        """Create the integrals of the voltage and the state of charge.
+
+        Returns:
+            The areas and potential integrals of the collector and the
+            membrane, when they have markers, and the amounts of the reduced
+            and oxidized ion, by name.
+        """
         domain = self._domain
         functionals: dict[str, ufl.Form] = {}
         if self._collector is not None:
@@ -621,6 +740,14 @@ class RedoxHalfCell:
         discretization.set(values)
 
     def _check_boundaries(self, what: str) -> None:
+        """Check that the collector and the membrane have facet markers.
+
+        Args:
+            what: The quantity that needs them, for the error message.
+
+        Raises:
+            ValueError: If either has none.
+        """
         if self._collector is None or self._membrane is None:
             raise ValueError(
                 f"The {what} needs the facet markers of the current collector and "
@@ -677,9 +804,15 @@ def _check_reservoir(
 ) -> None:
     """Check the reaction and the reservoir against the ions.
 
-    The reservoir names the transported ions: all but one, which follows
-    from electroneutrality and closes the equations. Every ion of the
-    reaction is transported.
+    Args:
+        ions: The ions of the electrolyte.
+        reservoir: The reservoir concentrations. They must name all ions
+            but one, which follows from electroneutrality, and every ion of
+            the reaction.
+        couple: The redox couple.
+
+    Raises:
+        ValueError: If the reaction or the reservoir does not match the ions.
     """
     couple.check(ions)
     unknown = sorted(set(reservoir) - {ion.name for ion in ions})

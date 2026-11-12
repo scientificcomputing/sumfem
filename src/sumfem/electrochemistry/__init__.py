@@ -5,7 +5,7 @@ r"""Models of electrochemistry, built on :mod:`sumfem.models`.
 - Porous electrodes: :class:`PorousElectrode`, and the :class:`Region` of
   a cell filled with electrolyte.
 - Charge and transport in the electrolyte: :class:`ElectrolyteConduction`
-  and :class:`NernstPlanck`.
+  and :class:`NernstPlanck`, with storage :class:`TransientNernstPlanck`.
 - Kinetics: :class:`ExchangeCurrentButlerVolmer`, :class:`ButlerVolmer`,
   :class:`MassTransferButlerVolmer` and :class:`PistonVelocityButlerVolmer`,
   on :class:`ElectrodeReaction`, with the Butler-Volmer equation
@@ -29,7 +29,7 @@ from .kinetics import (
     PistonVelocityButlerVolmer,
 )
 from .porous import PorousElectrode, Region
-from .transport import NernstPlanck
+from .transport import NernstPlanck, TransientNernstPlanck
 
 __all__ = [
     "Electrolyte",
@@ -38,6 +38,7 @@ __all__ = [
     "Region",
     "ElectrolyteConduction",
     "NernstPlanck",
+    "TransientNernstPlanck",
     "RedoxCouple",
     "RedoxHalfCell",
     "ButlerVolmer",
