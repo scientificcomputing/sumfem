@@ -257,8 +257,8 @@ CONCENTRATION_UNIT = syu.mol / syu.m**3
 DIFFUSIVITY_UNIT = syu.m**2 / syu.second
 
 POSITIVE_IONS = (
-    Ion("VO", 2, 3.9e-10 * DIFFUSIVITY_UNIT, positive=True),
-    Ion("VO2", 1, 3.9e-10 * DIFFUSIVITY_UNIT, positive=True),
+    Ion("VO", 2, 3.9e-10 * DIFFUSIVITY_UNIT),
+    Ion("VO2", 1, 3.9e-10 * DIFFUSIVITY_UNIT),
     Ion("H", 1, 9.312e-9 * DIFFUSIVITY_UNIT),
     Ion("HSO4", -1, 1.33e-9 * DIFFUSIVITY_UNIT),
     Ion("H2O", 0, 2.3e-9 * DIFFUSIVITY_UNIT),

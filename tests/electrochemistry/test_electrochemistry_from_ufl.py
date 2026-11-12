@@ -52,7 +52,7 @@ def test_conduction_and_transport_in_a_porous_region(cell, box, compare):
     electroneutrality, and Nernst-Planck transport of the three, with
     advection of V2+, in the pores of an electrode on the left half.
 
-    The conductivity takes the positive parts of the vanadium ions, and every
+    The conductivity takes the concentrations as they are, and every
     diffusivity Bruggeman's correction of the porosity.
     """
     gdim = ufl.Cell(cell).topological_dimension
@@ -61,19 +61,14 @@ def test_conduction_and_transport_in_a_porous_region(cell, box, compare):
     W = ufl.MixedFunctionSpace(V, V, V, V)
     phi, c2, c3, h = (ufl.Coefficient(V) for _ in range(4))
     v_phi, w2, w3, wh = ufl.TestFunctions(W)
-    F, R, T, floor, eps, D2, D3, DH, DS = (ufl.Constant(mesh) for _ in range(9))
+    F, R, T, eps, D2, D3, DH, DS = (ufl.Constant(mesh) for _ in range(8))
     sulfate = -(2 * c2 + 3 * c3 + h) / -2
     correction = eps**1.5
     conductivity = (
         F**2
         / (R * T)
         * correction
-        * (
-            4 * D2 * positive_part(c2, floor)
-            + 9 * D3 * positive_part(c3, floor)
-            + DH * h
-            + 4 * DS * sulfate
-        )
+        * (4 * D2 * c2 + 9 * D3 * c3 + DH * h + 4 * DS * sulfate)
     )
     diffusion = (
         F
@@ -103,7 +98,7 @@ def test_conduction_and_transport_in_a_porous_region(cell, box, compare):
     names = {
         DOMAIN: mesh,
         **{n: c for n, c in zip(("phi", "c2", "c3", "h"), (phi, c2, c3, h))},
-        **dict(F=F, R=R, T=T, floor=floor, eps=eps, D2=D2, D3=D3, DH=DH, DS=DS),
+        **dict(F=F, R=R, T=T, eps=eps, D2=D2, D3=D3, DH=DH, DS=DS),
     }
     plain = UFLResidual(
         "plain",
@@ -117,12 +112,12 @@ def test_conduction_and_transport_in_a_porous_region(cell, box, compare):
     potential = Field("phi", domain, ("Lagrange", 1))
     fields = [Field(name, domain, ("Lagrange", 1)) for name in ("c2", "c3", "h")]
     ions = [
-        Ion("V2", 2, 2.4e-10, fields[0], positive=True),
-        Ion("V3", 3, 2.4e-10, fields[1], positive=True),
+        Ion("V2", 2, 2.4e-10, fields[0]),
+        Ion("V3", 3, 2.4e-10, fields[1]),
         Ion("H", 1, 9.3e-9, fields[2]),
         Ion("SO4", -2, 1.065e-9),
     ]
-    electrolyte = Electrolyte("e", domain, ions, concentration_floor=0.1)
+    electrolyte = Electrolyte("e", domain, ions)
     region = PorousElectrode("el", domain, ("LeftHalf",), porosity=0.8).region
     model = ElectrolyteConduction("charge", potential, electrolyte, region)
     model += NernstPlanck("V2", ions[0], electrolyte, potential, region, velocity=u)
@@ -133,7 +128,6 @@ def test_conduction_and_transport_in_a_porous_region(cell, box, compare):
         "F": electrolyte.F.default_si,
         "R": electrolyte.R.default_si,
         "T": electrolyte.T.default_si,
-        "floor": 0.1,
         "eps": 0.8,
         "D2": 2.4e-10,
         "D3": 2.4e-10,
@@ -198,8 +192,8 @@ def test_kinetics_of_a_redox_couple(cell, mass_transfer, box, compare):
     potentials = [Field(name, domain, ("Lagrange", 1)) for name in ("phi_s", "phi_l")]
     fields = [Field(name, domain, ("Lagrange", 1)) for name in ("c2", "c3")]
     ions = [
-        Ion("V2", 2, 2.4e-10, fields[0], positive=True),
-        Ion("V3", 3, 2.4e-10, fields[1], positive=True),
+        Ion("V2", 2, 2.4e-10, fields[0]),
+        Ion("V3", 3, 2.4e-10, fields[1]),
     ]
     electrolyte = Electrolyte(
         "e", domain, ions, density=1.3e3, viscosity=5e-3, concentration_floor=0.1
@@ -286,8 +280,8 @@ def test_positive_couple_with_protons_water_and_piston_velocities(cell, box, com
     potentials = [Field(name, domain, ("Lagrange", 1)) for name in ("phi_s", "phi_l")]
     fields = [Field(name, domain, ("Lagrange", 1)) for name in ("c4", "c5", "ch", "cw")]
     ions = [
-        Ion("VO", 2, 3.9e-10, fields[0], positive=True),
-        Ion("VO2", 1, 3.9e-10, fields[1], positive=True),
+        Ion("VO", 2, 3.9e-10, fields[0]),
+        Ion("VO2", 1, 3.9e-10, fields[1]),
         Ion("H", 1, 9.3e-9, fields[2]),
         Ion("H2O", 0, 2.3e-9, fields[3]),
         Ion("SO4", -2, 1.1e-9),

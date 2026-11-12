@@ -366,8 +366,8 @@ DIFFUSIVITY = syu.m**2 / syu.second
 CONCENTRATION = syu.mol / syu.m**3
 
 IONS = (
-    Ion("V2", 2.0, 8.10e-12 * DIFFUSIVITY, positive=True),
-    Ion("V3", 3.0, 1.65e-11 * DIFFUSIVITY, positive=True),
+    Ion("V2", 2.0, 8.10e-12 * DIFFUSIVITY),
+    Ion("V3", 3.0, 1.65e-11 * DIFFUSIVITY),
     Ion("H", 1.0, 9.312e-9 * DIFFUSIVITY),
     Ion("HSO4", -1.0, 1.33e-9 * DIFFUSIVITY),
     Ion("SO4", -2.0, 1.065e-9 * DIFFUSIVITY),

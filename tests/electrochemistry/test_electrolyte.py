@@ -3,6 +3,7 @@ from them, and the models of a vanadium electrode built on it."""
 
 import pytest
 import sympy.physics.units as syu
+import ufl
 
 from sumfem.discrete import DomainMaps, discretize
 from sumfem.electrochemistry import (
@@ -31,8 +32,8 @@ def vanadium(domain):
         for name in ("c2", "c3", "h")
     )
     return [
-        Ion("V2", 2, 2.4e-10, c2, positive=True),
-        Ion("V3", 3, 2.4e-10, c3, positive=True),
+        Ion("V2", 2, 2.4e-10, c2),
+        Ion("V3", 3, 2.4e-10, c3),
         Ion("H", 1, 9.3e-9, h),
         Ion("SO4", -2, 1.065e-9),
     ]
@@ -56,7 +57,7 @@ def uniform(domain, square, values):
     ions = vanadium(domain)
     electrolyte = Electrolyte("e", domain, ions)
     _, phi_l = potentials(domain)
-    # The conduction holds the parameters of every ion, and the floor
+    # The conduction holds the parameters of every ion
     model = ElectrolyteConduction("charge", phi_l, electrolyte)
     for ion in ions[:3]:
         model += NernstPlanck(ion.name, ion, electrolyte, phi_l)
@@ -89,15 +90,64 @@ def test_the_balanced_ion_follows_from_electroneutrality(domain, square):
     assert sulfate == pytest.approx(-charge / electrolyte["SO4"].charge)
 
 
-def test_positive_ions_take_the_positive_part(domain, square):
+def test_concentrations_keep_their_sign(domain, square):
+    """The electrolyte gives a concentration that undershoots zero as it is,
+    and the balanced one from it."""
     electrolyte, disc = uniform(domain, square, {**VALUES, "V2": -1.0})
-    assert mean(disc, domain, electrolyte.concentration("V2")) == pytest.approx(
-        0.0, abs=1e-12
+    assert mean(disc, domain, electrolyte.concentration("V2")) == pytest.approx(-1.0)
+    sulfate = (2 * -1.0 + 3 * VALUES["V3"] + VALUES["H"]) / 2
+    assert mean(disc, domain, electrolyte.concentration("SO4")) == pytest.approx(
+        sulfate
     )
-    unclipped = electrolyte.concentration("V2", positive=False)
-    assert mean(disc, domain, unclipped) == pytest.approx(-1.0)
-    # An ion that is not positive keeps its sign unless asked
-    assert mean(disc, domain, electrolyte.concentration("H")) == pytest.approx(3.0)
+
+
+def test_the_current_is_the_charge_the_ions_carry(domain, square):
+    """The electrolyte current equals ``F sum_j z_j N_j``, with the
+    Nernst-Planck fluxes of every ion, sulfate's from electroneutrality, in
+    a porous region with advection, also where V2+ undershoots zero.
+
+    A regression test: the conductivity once took the positive part of the
+    vanadium concentrations while migration did not, so conduction did not
+    carry the charge the ions moved where a concentration was negative.
+    """
+    ions = vanadium(domain)
+    electrolyte = Electrolyte("e", domain, ions)
+    _, phi_l = potentials(domain)
+    region = Region(porosity=0.6)
+    velocity = ufl.as_vector((1e-3, 2e-3))
+    transport = [
+        NernstPlanck(ion.name, ion, electrolyte, phi_l, region, velocity)
+        for ion in ions[:3]
+    ]
+    model = ElectrolyteConduction("charge", phi_l, electrolyte, region)
+    for summand in transport:
+        model += summand
+    disc = discretize([model], DomainMaps({domain: square()}))
+    profiles = {
+        ions[0].field: lambda x: -1.0 + 3.0 * x[0],
+        ions[1].field: lambda x: 2.0 + x[1],
+        ions[2].field: lambda x: 3.0 + x[0] * x[1],
+        phi_l: lambda x: x[0] ** 2 + 0.5 * x[1],
+    }
+    for field, profile in profiles.items():
+        disc.function(field).interpolate(profile)
+
+    e, sulfate = electrolyte, ions[3]
+    c = e.concentration(sulfate.name)
+    D = region.transport * e.diffusivity(sulfate.name)
+    migration = D * sulfate.charge * e.F * c / (e.R * e.T) * ufl.grad(phi_l)
+    fluxes = [m.flux() for m in transport]
+    fluxes.append(-D * ufl.grad(c) - migration + velocity * c)
+    charges = [e.F * ion.charge * N for ion, N in zip(ions, fluxes)]
+    current = e.current_density(phi_l, region.transport)
+
+    # The charge fluxes of the ions largely cancel, so the round-off is
+    # relative to them, not to the current
+    difference = current - sum(charges)
+    error = mean(disc, domain, ufl.inner(difference, difference))
+    size = sum(mean(disc, domain, ufl.inner(q, q)) for q in charges)
+    assert mean(disc, domain, ufl.inner(current, current)) > 0
+    assert error <= 1e-24 * size
 
 
 @pytest.mark.parametrize(

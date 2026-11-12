@@ -39,16 +39,12 @@ class Ion:
             default value of the parameter the electrolyte creates.
         concentration: The field of a transported ion. ``None`` for the one
             ion whose concentration follows from electroneutrality.
-        positive: Use a smooth positive part of the concentration in the
-            conductivity and in reaction kinetics. Use it for ions that can
-            be depleted, such as the active species.
     """
 
     name: str
     charge: float
     diffusivity: float | sympy.Expr
     concentration: Field | None = None
-    positive: bool = False
 
     @property
     def field(self) -> Field:
@@ -278,26 +274,30 @@ class Electrolyte:
         return self._ions[name]
 
     def positive_part(self, c: ufl.core.expr.Expr) -> ufl.core.expr.Expr:
-        """The smooth positive part ``(c + sqrt(c^2 + floor^2)) / 2``."""
+        """The smooth positive part ``(c + sqrt(c^2 + floor^2)) / 2``.
+
+        Reaction kinetics take it of the concentrations they react, see
+        :class:`~sumfem.electrochemistry.ButlerVolmer`, so that a
+        concentration that undershoots zero neither reverses a reaction nor
+        enters a logarithm.
+
+        Args:
+            c: A concentration.
+        """
         return 0.5 * (c + ufl.sqrt(c * c + self._floor * self._floor))
 
-    def concentration(
-        self, name: str, positive: bool | None = None
-    ) -> ufl.core.expr.Expr:
-        """Concentration of an ion, as used in conductivity and kinetics.
+    def concentration(self, name: str) -> ufl.core.expr.Expr:
+        """Concentration of an ion, with its sign.
 
         That is the field of a transported ion, and the expression given by
-        electroneutrality for the ion without one.
+        electroneutrality for the ion without one. The conductivity uses it
+        as it is, as Nernst-Planck migration does, so the current is the
+        charge the ions carry, see :meth:`current_density`.
 
         Args:
             name: Name of the ion.
-            positive: Take the positive part of the concentration. Defaults
-                to :attr:`Ion.positive` of the ion.
         """
-        concentration = self._concentrations[name]
-        if self._ions[name].positive if positive is None else positive:
-            return self.positive_part(concentration)
-        return concentration
+        return self._concentrations[name]
 
     def diffusivity(self, name: str) -> Parameter:
         """Diffusivity of an ion in free electrolyte, the parameter ``D_<ion>``.
@@ -331,9 +331,7 @@ class Electrolyte:
             correction: See :meth:`conductivity`.
         """
         total = sum(
-            s.charge
-            * self.diffusivity(s.name)
-            * ufl.grad(self.concentration(s.name, positive=False))
+            s.charge * self.diffusivity(s.name) * ufl.grad(self.concentration(s.name))
             for s in self._ions.values()
         )
         return self._F * correction * total
@@ -344,6 +342,12 @@ class Electrolyte:
         correction: ufl.core.expr.Expr | float = 1.0,
     ) -> ufl.core.expr.Expr:
         """Current density ``-kappa grad(phi) - F sum_j z_j D_j grad(c_j)``.
+
+        It is the charge the ions carry, ``F sum_j z_j N_j``, with the
+        Nernst-Planck fluxes ``N_j`` of every ion, also the one given by
+        electroneutrality: the conductivity and the migration use the same
+        concentrations, and advection carries no charge, as
+        ``sum_j z_j c_j = 0``.
 
         Args:
             potential: The electrolyte potential.
