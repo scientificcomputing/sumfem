@@ -48,6 +48,9 @@
 
 .. autoclass:: MassTransferButlerVolmer
    :members:
+
+.. autoclass:: PistonVelocityButlerVolmer
+   :members:
 ```
 
 ## Half-cells
