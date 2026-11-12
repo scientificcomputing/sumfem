@@ -27,6 +27,8 @@ from ..error_handling import ComponentError, SystemBuildError
 from .bcs import DirichletBC
 from .components import (
     Component,
+    ExpressionOrDefault,
+    ExpressionOrValue,
     Functional,
     FunctionalSum,
     Jacobian,
@@ -78,6 +80,8 @@ __all__ = [
     "Clock",
     "Component",
     "Functional",
+    "ExpressionOrDefault",
+    "ExpressionOrValue",
     "expression_or_parameter",
     "input_or_parameter",
     "FunctionalSum",
