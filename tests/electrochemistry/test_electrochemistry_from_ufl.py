@@ -22,6 +22,7 @@ from sumfem.electrochemistry import (
     PistonVelocityButlerVolmer,
     PorousElectrode,
 )
+from sumfem.models import Diffusion
 from sumfem.symbolic import Domain, Field, Residual, UFLResidual
 
 CELLS = ["interval", "triangle", "quadrilateral", "tetrahedron", "hexahedron"]
@@ -139,6 +140,90 @@ def test_conduction_and_transport_in_a_porous_region(cell, box, compare):
         plain.unknowns,
         model,
         [potential, *fields],
+        box(cell),
+        [(constants(values), {})],
+    )
+
+
+@pytest.mark.parametrize("cell", CELLS)
+def test_conduction_and_transport_at_the_temperature_of_a_heat_equation(
+    cell, box, compare
+):
+    """Conduction and Nernst-Planck transport of V2+, V3+ and H+, with SO4 2-
+    by electroneutrality, at a temperature that is the unknown of a heat
+    equation, so the electrolyte's equations depend on it.
+    """
+    gdim = ufl.Cell(cell).topological_dimension
+    mesh = ufl.Mesh(element("Lagrange", cell, 1, shape=(gdim,)))
+    V = ufl.FunctionSpace(mesh, element("Lagrange", cell, 1))
+    W = ufl.MixedFunctionSpace(V, V, V, V, V)
+    phi, c2, c3, h, T = (ufl.Coefficient(V) for _ in range(5))
+    v_phi, w2, w3, wh, wT = ufl.TestFunctions(W)
+    F, R, k, D2, D3, DH, DS = (ufl.Constant(mesh) for _ in range(7))
+    sulfate = (2 * c2 + 3 * c3 + h) / 2
+    conductivity = (
+        F**2 / (R * T) * (4 * D2 * c2 + 9 * D3 * c3 + DH * h + 4 * DS * sulfate)
+    )
+    diffusion = F * (
+        2 * D2 * ufl.grad(c2)
+        + 3 * D3 * ufl.grad(c3)
+        + DH * ufl.grad(h)
+        - 2 * DS * ufl.grad(sulfate)
+    )
+    current = -conductivity * ufl.grad(phi) - diffusion
+
+    def flux(c, z, D):
+        return -D * ufl.grad(c) - D * z * F * c / (R * T) * ufl.grad(phi)
+
+    # Charge conservation, div(i) = 0, in the equation of the potential
+    charge = ufl.inner(-current, ufl.grad(v_phi)) * ufl.dx
+    # The balance of each transported ion, div(N) = 0
+    vanadium2 = -ufl.inner(flux(c2, 2, D2), ufl.grad(w2)) * ufl.dx
+    vanadium3 = -ufl.inner(flux(c3, 3, D3), ufl.grad(w3)) * ufl.dx
+    protons = -ufl.inner(flux(h, 1, DH), ufl.grad(wh)) * ufl.dx
+    # The heat equation, -div(k grad(T)) = 0
+    heat = k * ufl.inner(ufl.grad(T), ufl.grad(wT)) * ufl.dx
+    residual = charge + vanadium2 + vanadium3 + protons + heat
+    unknowns = dict(phi=phi, c2=c2, c3=c3, h=h, T=T)
+    constants_ = dict(F=F, R=R, k=k, D2=D2, D3=D3, DH=DH, DS=DS)
+    plain = UFLResidual(
+        "plain",
+        residual,
+        list(unknowns.values()),
+        names={DOMAIN: mesh, **unknowns, **constants_},
+    )
+
+    domain = Domain(DOMAIN, cell)
+    potential, *fields, temperature = (
+        Field(name, domain, ("Lagrange", 1)) for name in unknowns
+    )
+    ions = [
+        Ion("V2", 2, 2.4e-10, fields[0]),
+        Ion("V3", 3, 2.4e-10, fields[1]),
+        Ion("H", 1, 9.3e-9, fields[2]),
+        Ion("SO4", -2, 1.065e-9),
+    ]
+    electrolyte = Electrolyte("e", domain, ions, temperature=temperature)
+    assert electrolyte.T is temperature
+    model = ElectrolyteConduction("charge", potential, electrolyte)
+    for ion in ions[:3]:
+        model += NernstPlanck(ion.name, ion, electrolyte, potential)
+    model += Diffusion("heat", temperature, 0.6)
+
+    values = {
+        "F": electrolyte.F.default_si,
+        "R": electrolyte.R.default_si,
+        "k": 0.6,
+        "D2": 2.4e-10,
+        "D3": 2.4e-10,
+        "DH": 9.3e-9,
+        "DS": 1.065e-9,
+    }
+    compare(
+        plain,
+        plain.unknowns,
+        model,
+        [potential, *fields, temperature],
         box(cell),
         [(constants(values), {})],
     )

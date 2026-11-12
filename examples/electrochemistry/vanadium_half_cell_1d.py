@@ -140,17 +140,17 @@ electrode = PorousElectrode(
 # The ions of the electrolyte are given with their charges and diffusivities,
 # in their units, which sumfem converts to SI, see {ref}`units-checking`. The
 # kinetics take the positive part of the vanadium concentrations, as they may
-# be depleted. The concentrations
-# of the reservoir name the ions that are transported, each with a field and
-# the equations of {eq}`half-cell`. Sulfate has none: electroneutrality,
-# the last equation of {eq}`half-cell`, with the charges of the ions,
+# be depleted. The concentrations of the reservoir name the ions that are
+# transported, each with a field and the equations of {eq}`half-cell`.
+# Sulfate has none: electroneutrality, the last equation of {eq}`half-cell`,
+# {eq}`electroneutrality` with the charges of the ions,
 #
 # $$
 # \begin{aligned}
 #   2 c_{\mathrm{V^{2+}}} + 3 c_{\mathrm{V^{3+}}} + c_{\mathrm{H^+}}
 #   - c_{\mathrm{HSO_4^-}} - 2 c_{\mathrm{SO_4^{2-}}} &= 0,
 # \end{aligned}
-# $$ (electroneutrality)
+# $$ (vanadium-electroneutrality)
 #
 # is solved for its concentration, which is then no unknown, but an
 # expression of the others:
