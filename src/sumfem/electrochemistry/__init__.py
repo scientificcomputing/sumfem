@@ -1,43 +1,45 @@
 r"""Models of electrochemistry, built on :mod:`sumfem.models`.
 
-- Electrolytes: :class:`Electrolyte`, a dilute solution of :class:`Ion`
-  and the constants and properties its models share.
-- Porous electrodes: :class:`PorousElectrode`, and the :class:`Region` of
-  a cell filled with electrolyte.
-- Charge and transport in the electrolyte: :class:`ElectrolyteConduction`
-  and :class:`NernstPlanck`, with storage :class:`TransientNernstPlanck`.
-- Kinetics: :class:`ExchangeCurrentButlerVolmer`, :class:`ButlerVolmer`,
-  :class:`MassTransferButlerVolmer` and :class:`PistonVelocityButlerVolmer`,
-  on :class:`ElectrodeReaction`, with the Butler-Volmer equation
-  :func:`~sumfem.models.butler_volmer`.
-- Membranes: :class:`ProtonExchangeMembrane`, with the flow of water of
-  :class:`SchloeglFlow`, whose current the protons of an electrode carry
-  through its face, :class:`MembraneProtonFlux`.
-- Half-cells of a redox flow battery: :class:`RedoxHalfCell`, negative or
-  positive, of any :class:`RedoxCouple` and electrolyte.
-- Full cells: :class:`FullCell`, two half-cells, each a
-  :class:`HalfCellSpec`, and a membrane between them, a
-  :class:`MembraneSpec`.
+The package has three layers, each importing only from those before it:
+
+- :mod:`~sumfem.electrochemistry.materials`, what the cells are made of:
+  :class:`Electrolyte` of :class:`Ion`, :class:`RedoxCouple`,
+  :class:`PorousElectrode` and :class:`Region`.
+- :mod:`~sumfem.electrochemistry.models`, the equations: charge and
+  transport, :class:`ElectrolyteConduction`, :class:`NernstPlanck` and
+  :class:`TransientNernstPlanck`; kinetics, :class:`ButlerVolmer` and its
+  variants on :class:`ElectrodeReaction`; membranes,
+  :class:`ProtonExchangeMembrane`, :class:`SchloeglFlow` and
+  :class:`MembraneProtonFlux`; and the flow through the electrodes,
+  :class:`ElectrodeFlow` and :class:`DarcyFlow`.
+- :mod:`~sumfem.electrochemistry.cells`, assembled from them:
+  :class:`RedoxHalfCell` and :class:`FullCell`, with the specifications
+  :class:`HalfCellSpec`, :class:`MembraneSpec` and :class:`FlowSpec`.
+
+Every name is also imported from here.
 
 The package imports from the core of :mod:`sumfem`, and never the other
 way around.
 """
 
-from .charge import ElectrolyteConduction
-from .couple import RedoxCouple
-from .electrolyte import Electrolyte, Ion
-from .full_cell import FullCell, HalfCellSpec, MembraneSpec
-from .half_cell import RedoxHalfCell
-from .kinetics import (
+from .cells import FlowSpec, FullCell, HalfCellSpec, MembraneSpec, RedoxHalfCell
+from .materials import Electrolyte, Ion, PorousElectrode, RedoxCouple, Region
+from .models import (
     ButlerVolmer,
+    DarcyFlow,
+    ElectrodeFlow,
     ElectrodeReaction,
+    ElectrolyteConduction,
     ExchangeCurrentButlerVolmer,
+    FlowSetup,
     MassTransferButlerVolmer,
+    MembraneProtonFlux,
+    NernstPlanck,
     PistonVelocityButlerVolmer,
+    ProtonExchangeMembrane,
+    SchloeglFlow,
+    TransientNernstPlanck,
 )
-from .membrane import MembraneProtonFlux, ProtonExchangeMembrane, SchloeglFlow
-from .porous import PorousElectrode, Region
-from .transport import NernstPlanck, TransientNernstPlanck
 
 __all__ = [
     "Electrolyte",
@@ -55,6 +57,10 @@ __all__ = [
     "FullCell",
     "HalfCellSpec",
     "MembraneSpec",
+    "FlowSpec",
+    "ElectrodeFlow",
+    "DarcyFlow",
+    "FlowSetup",
     "ButlerVolmer",
     "ElectrodeReaction",
     "ExchangeCurrentButlerVolmer",

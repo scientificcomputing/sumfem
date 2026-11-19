@@ -6,8 +6,7 @@ import ufl
 
 from sumfem.symbolic import Field, Residual
 
-from .electrolyte import Electrolyte
-from .porous import Region
+from ..materials import Electrolyte, Region
 
 __all__ = ["ElectrolyteConduction"]
 
@@ -18,9 +17,9 @@ class ElectrolyteConduction(Residual):
     The weak form of :math:`\nabla \cdot \mathbf{i}_l = 0`, with the current
     density :math:`\mathbf{i}_l` of :eq:`electrolyte-current`, the charge the
     ions carry, computed by the electrolyte's
-    :meth:`~sumfem.electrochemistry.electrolyte.Electrolyte.current_density`
+    :meth:`~sumfem.electrochemistry.Electrolyte.current_density`
     with the diffusivities corrected for the region, :math:`t` the region's
-    :attr:`~sumfem.electrochemistry.porous.Region.transport`, as in
+    :attr:`~sumfem.electrochemistry.Region.transport`, as in
     :eq:`nernst-planck-flux`. Sources, e.g. of an
     :class:`~sumfem.electrochemistry.ElectrodeReaction`, are added to it as
     models of their own.

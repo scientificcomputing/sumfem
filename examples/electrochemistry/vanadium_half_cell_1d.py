@@ -185,6 +185,7 @@ reservoir = {
 }
 # -
 
+# (vanadium-half-cell-couple)=
 # A {py:class}`RedoxCouple <sumfem.electrochemistry.RedoxCouple>` gives the
 # reaction $\mathrm{V^{2+} \rightleftharpoons V^{3+} + e^-}$ of
 # {eq}`half-cell-kinetics`: the ion `reduced`, V²⁺, the ion `oxidized`, V³⁺,

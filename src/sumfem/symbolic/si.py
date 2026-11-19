@@ -18,7 +18,18 @@ from sympy.physics.units.definitions.dimension_definitions import amount_of_subs
 from sympy.physics.units.systems.si import SI
 from ufl_units import get_factor
 
-__all__ = ["Unit", "has_units", "molecule", "si_factor", "to_si"]
+__all__ = [
+    "CONCENTRATION",
+    "DENSITY",
+    "DIFFUSIVITY",
+    "PERMEABILITY",
+    "VISCOSITY",
+    "Unit",
+    "has_units",
+    "molecule",
+    "si_factor",
+    "to_si",
+]
 
 Unit: typing.TypeAlias = sympy.Expr
 """A sympy unit expression, e.g. ``syu.meter / syu.second``."""
@@ -28,6 +39,21 @@ molecule = syu.Quantity("molecule")
 species, e.g. ``molecule / syu.um**2`` for a surface density."""
 SI.set_quantity_dimension(molecule, amount_of_substance)
 SI.set_quantity_scale_factor(molecule, syu.mol / syu.avogadro_number)
+
+CONCENTRATION = syu.mol / syu.m**3
+"""Unit of concentrations."""
+
+DENSITY = syu.kg / syu.m**3
+"""Unit of densities."""
+
+DIFFUSIVITY = syu.m**2 / syu.second
+"""Unit of diffusivities."""
+
+PERMEABILITY = syu.m**2
+"""Unit of permeabilities."""
+
+VISCOSITY = syu.pascal * syu.second
+"""Unit of dynamic viscosities."""
 
 
 def _as_unit(unit: Unit | None) -> sympy.Expr:

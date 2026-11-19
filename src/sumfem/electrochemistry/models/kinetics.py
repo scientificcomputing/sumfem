@@ -9,14 +9,13 @@ from __future__ import annotations
 
 import typing
 
-import numpy.typing as npt
 import sympy.physics.units as syu
 import ufl
 
 from sumfem.models import RateReaction, butler_volmer
-from sumfem.symbolic import Field, as_expr
+from sumfem.symbolic import ExpressionOrValue, Field, as_expr
 
-from .electrolyte import Electrolyte, Ion
+from ..materials import Electrolyte, Ion
 
 __all__ = [
     "ButlerVolmer",
@@ -25,9 +24,6 @@ __all__ = [
     "MassTransferButlerVolmer",
     "PistonVelocityButlerVolmer",
 ]
-
-INPUT = ufl.core.expr.Expr | npt.ArrayLike | None
-"""A model input: an expression, a value, or ``None`` for a parameter."""
 
 
 class ElectrodeReaction(RateReaction):
@@ -84,7 +80,7 @@ class ElectrodeReaction(RateReaction):
         electrolyte: Electrolyte,
         reactants: typing.Mapping[ufl.core.expr.Expr, int] | None = None,
         products: typing.Mapping[ufl.core.expr.Expr, int] | None = None,
-        specific_area: INPUT = None,
+        specific_area: ExpressionOrValue = None,
         electrons: int = 1,
         markers: tuple[str, ...] = (),
     ):
@@ -189,13 +185,13 @@ class ExchangeCurrentButlerVolmer(ElectrodeReaction):
         solid_potential: Field,
         electrolyte_potential: Field,
         electrolyte: Electrolyte,
-        exchange_current: INPUT = None,
-        equilibrium_potential: INPUT = None,
-        anodic_transfer: INPUT = None,
-        cathodic_transfer: INPUT = None,
+        exchange_current: ExpressionOrValue = None,
+        equilibrium_potential: ExpressionOrValue = None,
+        anodic_transfer: ExpressionOrValue = None,
+        cathodic_transfer: ExpressionOrValue = None,
         reduced: ufl.core.expr.Expr | None = None,
         oxidized: ufl.core.expr.Expr | None = None,
-        specific_area: INPUT = None,
+        specific_area: ExpressionOrValue = None,
         electrons: int = 1,
         markers: tuple[str, ...] = (),
     ):
@@ -281,7 +277,7 @@ class ButlerVolmer(ElectrodeReaction):
     of the reduced and oxidized ion at the electrode surface. These are, by
     default, the smooth positive parts of the bulk concentrations,
     :math:`c^+ = (c + \sqrt{c^2 + c_\text{floor}^2}) / 2`, see
-    :meth:`~sumfem.electrochemistry.electrolyte.Electrolyte.positive_part`.
+    :meth:`~sumfem.electrochemistry.Electrolyte.positive_part`.
     The reduced and oxidized ions are ions in the electrolyte, given by name.
 
     Subclasses change the kinetics by overriding
@@ -345,11 +341,11 @@ class ButlerVolmer(ElectrodeReaction):
         electrolyte: Electrolyte,
         reduced: str,
         oxidized: str,
-        specific_area: INPUT = None,
-        rate_constant: INPUT = None,
-        formal_potential: INPUT = None,
-        anodic_transfer: INPUT = None,
-        cathodic_transfer: INPUT = None,
+        specific_area: ExpressionOrValue = None,
+        rate_constant: ExpressionOrValue = None,
+        formal_potential: ExpressionOrValue = None,
+        anodic_transfer: ExpressionOrValue = None,
+        cathodic_transfer: ExpressionOrValue = None,
         electrons: int = 1,
         markers: tuple[str, ...] = (),
         reactants: typing.Mapping[str, int] | None = None,
@@ -581,18 +577,18 @@ class MassTransferButlerVolmer(ButlerVolmer):
         reduced: str,
         oxidized: str,
         velocity: ufl.core.expr.Expr,
-        fiber_diameter: INPUT = None,
-        density: INPUT = None,
-        viscosity: INPUT = None,
+        fiber_diameter: ExpressionOrValue = None,
+        density: ExpressionOrValue = None,
+        viscosity: ExpressionOrValue = None,
         sherwood_factor: float = 7.0,
         reynolds_exponent: float = 0.4,
         speed_floor: float = 1e-16,
         transfer_floor: float = 1e-14,
-        specific_area: INPUT = None,
-        rate_constant: INPUT = None,
-        formal_potential: INPUT = None,
-        anodic_transfer: INPUT = None,
-        cathodic_transfer: INPUT = None,
+        specific_area: ExpressionOrValue = None,
+        rate_constant: ExpressionOrValue = None,
+        formal_potential: ExpressionOrValue = None,
+        anodic_transfer: ExpressionOrValue = None,
+        cathodic_transfer: ExpressionOrValue = None,
         electrons: int = 1,
         markers: tuple[str, ...] = (),
         reactants: typing.Mapping[str, int] | None = None,
@@ -771,7 +767,7 @@ class PistonVelocityButlerVolmer(ButlerVolmer):
         electrolyte: Electrolyte,
         reduced: str,
         oxidized: str,
-        fiber_distance: INPUT = None,
+        fiber_distance: ExpressionOrValue = None,
         transfer_floor: float = 1e-14,
         **kwargs: typing.Any,
     ):

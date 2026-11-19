@@ -7,8 +7,7 @@ import ufl
 from sumfem.models import Accumulation
 from sumfem.symbolic import Field, Residual, ResidualSum, as_expr
 
-from .electrolyte import Electrolyte, Ion
-from .porous import Region
+from ..materials import Electrolyte, Ion, Region
 
 __all__ = ["NernstPlanck", "TransientNernstPlanck"]
 
@@ -29,7 +28,7 @@ class NernstPlanck(Residual):
 
     with its diffusivity :math:`D` corrected for the region,
     :math:`D_\text{eff} = t D` with :math:`t` the region's
-    :attr:`~sumfem.electrochemistry.porous.Region.transport`, the electrolyte
+    :attr:`~sumfem.electrochemistry.Region.transport`, the electrolyte
     potential :math:`\phi` and the superficial velocity :math:`\mathbf{u}`.
     For transient transport, see :class:`TransientNernstPlanck`.
 
@@ -126,7 +125,7 @@ class TransientNernstPlanck(ResidualSum):
     e.g. of an :class:`~sumfem.electrochemistry.ElectrodeReaction`, are
     added to it as models of their own. It is the sum of
     ``"<name>_storage"``, an :class:`~sumfem.models.Accumulation` weighted
-    with the region's :attr:`~sumfem.electrochemistry.porous.Region.storage`,
+    with the region's :attr:`~sumfem.electrochemistry.Region.storage`,
     and ``"<name>_transport"``, a :class:`NernstPlanck`.
 
     Args:

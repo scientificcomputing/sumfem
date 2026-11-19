@@ -44,7 +44,7 @@ R = float(to_si(GAS_CONSTANT, syu.joule / (syu.mol * syu.kelvin)))
 T = 298.15
 
 
-def steady(model):
+def create_steady_membrane(model):
     """The membrane without the storage of water."""
     return ResidualSum(
         [m for m in model.components if not m.name.endswith("storage")],
@@ -52,7 +52,7 @@ def steady(model):
     )
 
 
-def membrane(domain, water=True, pressure=True):
+def create_membrane(domain, water=True, pressure=True):
     phi = Field("phi", domain, ("Lagrange", 1), unit=syu.volt)
     c_w = Field("c_w", domain, ("Lagrange", 1), unit=syu.mol / syu.m**3, scale=4e4)
     p = Field("p", domain, ("Lagrange", 1), unit=syu.pascal, scale=1e3)
@@ -93,7 +93,7 @@ def test_the_membrane_against_plain_ufl(cell, box, compare):
     plain = UFLResidual("plain", residual, [phi, c_w, p], names=names)
 
     domain = Domain(DOMAIN, cell)
-    model, *fields = membrane(domain)
+    model, *fields = create_membrane(domain)
     values = {
         "plain.F": F,
         "plain.R": R,
@@ -108,7 +108,7 @@ def test_the_membrane_against_plain_ufl(cell, box, compare):
     compare(
         plain,
         plain.unknowns,
-        steady(model),
+        create_steady_membrane(model),
         fields,
         box(cell),
         [(values, {})],
@@ -117,7 +117,7 @@ def test_the_membrane_against_plain_ufl(cell, box, compare):
 
 def test_the_membrane_has_consistent_units():
     domain = Domain("cell", "interval")
-    model, *_ = membrane(domain)
+    model, *_ = create_membrane(domain)
     build_system(model, check_units=True)
     build_system(model, substitutions=BDF(1).substitutions(model), check_units=True)
     names = [m.name for m in model.components]
@@ -128,13 +128,13 @@ def test_the_membrane_has_consistent_units():
         "membrane_water_diffusion",
         "membrane_water_advection",
     ]
-    still, *_ = membrane(domain, pressure=False)
+    still, *_ = create_membrane(domain, pressure=False)
     assert [m.name for m in still.components] == [
         "membrane_conduction",
         "membrane_water_storage",
         "membrane_water_diffusion",
     ]
-    bare, *_ = membrane(domain, water=False, pressure=False)
+    bare, *_ = create_membrane(domain, water=False, pressure=False)
     assert [m.name for m in bare.components] == ["membrane_conduction"]
 
 
@@ -158,7 +158,7 @@ def test_a_membrane_between_two_potentials_and_pressures():
         boundary=True,
     )
     domain = Domain.from_mesh("membrane", mesh, length_scale=L)
-    model, phi, c_w, p = membrane(domain)
+    model, phi, c_w, p = create_membrane(domain)
     dphi, dp, c0, cL = 0.01, -5e4, 4.2e4, 4.1e4
     bcs = [
         DirichletBC(phi, "Negative", 0.0),
@@ -170,7 +170,9 @@ def test_a_membrane_between_two_potentials_and_pressures():
     ]
     # The pressure's equation is some fifteen orders of magnitude smaller
     # than the potential's, so the equations are solved in dimensionless form
-    system = build_system(steady(model), check_units=True, factorize_equations=True)
+    system = build_system(
+        create_steady_membrane(model), check_units=True, factorize_equations=True
+    )
     disc = discretize([system, *bcs], DomainMaps({domain: marked}))
     Solver(disc[system], bcs).solve()
 
@@ -198,7 +200,7 @@ def test_a_membrane_between_two_potentials_and_pressures():
 
 def test_the_membrane_holds_the_protons_at_its_faces():
     domain = Domain("cell", "interval")
-    model, *_ = membrane(domain)
+    model, *_ = create_membrane(domain)
     protons = [Field(f"c_H_{side}", domain, ("Lagrange", 1)) for side in "ab"]
     bcs = model.proton_conditions(protons, ("Negative", "Positive"))
     assert [bc.field for bc in bcs] == protons

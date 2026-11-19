@@ -6,7 +6,7 @@ import dataclasses
 import types
 import typing
 
-import sympy
+from sumfem.symbolic import ExpressionOrDefault
 
 from .electrolyte import Ion
 
@@ -25,6 +25,12 @@ class RedoxCouple:
     :class:`~sumfem.models.RateReaction`. The kinetics are those of
     :class:`~sumfem.electrochemistry.ButlerVolmer`, in the concentrations of
     the couple.
+
+    The rate constant, the formal potential and the transfer coefficients
+    are each an expression, used as given, e.g. a rate constant of a
+    temperature field by Arrhenius' law, or the default of the parameter of
+    the half-cell of the couple, see
+    :func:`~sumfem.symbolic.expression_or_parameter`.
 
     Attributes:
         reduced: Name of the reduced ion, e.g. ``"V2"``.
@@ -50,12 +56,12 @@ class RedoxCouple:
 
     reduced: str
     oxidized: str
-    rate_constant: float | sympy.Expr
-    formal_potential: float | sympy.Expr
+    rate_constant: ExpressionOrDefault
+    formal_potential: ExpressionOrDefault
     oxidation_on_discharge: bool
     electrons: int = 1
-    anodic_transfer: float = 0.5
-    cathodic_transfer: float = 0.5
+    anodic_transfer: ExpressionOrDefault = 0.5
+    cathodic_transfer: ExpressionOrDefault = 0.5
     reactants: typing.Mapping[str, int] | None = None
     products: typing.Mapping[str, int] | None = None
 

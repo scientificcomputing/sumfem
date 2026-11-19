@@ -1,15 +1,22 @@
-"""Porous electrodes and the regions of a cell filled with electrolyte."""
+"""Porous electrodes, and the regions of a cell filled with electrolyte.
+
+:class:`PorousElectrode` is an electrode of carbon fibres filled with
+electrolyte: its porosity, the conductivity of its fibres, its specific
+area and the permeability of its fibres to the flow. A :class:`Region` is
+a part of a cell filled with electrolyte, the pores of an electrode or a
+free channel, with the porosity that weights storage and corrects
+transport.
+"""
 
 from __future__ import annotations
 
 import dataclasses
 
-import sympy
 import sympy.physics.units as syu
 import ufl
 
 from sumfem.models import bruggeman, ergun_coefficient, kozeny_carman
-from sumfem.symbolic import Domain, Parameter
+from sumfem.symbolic import Domain, ExpressionOrDefault, expression_or_parameter
 
 __all__ = ["PorousElectrode", "Region"]
 
@@ -47,46 +54,46 @@ class Region:
 class PorousElectrode:
     """A porous electrode of carbon fibers, filled with electrolyte.
 
-    The electrode creates a parameter for each argument below from the
-    porosity on, named ``"<name>.<argument>"``, such as
-    ``"<name>.porosity"``, with the argument as its default value. Models
-    that share an electrode share these parameters. A parameter without a
-    default value must be set on the discretization before it is used.
+    Each property is an expression, used as given, e.g. a field of another
+    model such as the porosity of a compressed felt or a conductivity of the
+    temperature, or the default of the parameter ``"<name>.<property>"``,
+    such as ``"<name>.porosity"``, in SI units or a quantity with units,
+    e.g. ``0.5 * syu.micrometer``, see
+    :func:`~sumfem.symbolic.expression_or_parameter`. Models that share an
+    electrode share these. A parameter without a default value must be set
+    on the discretization before it is used.
 
     Args:
         name: Prefix of the parameter names.
         domain: The domain of the parameters.
         markers: Cell markers of the electrode. Empty for the whole domain.
-        porosity: Default porosity, if any. Every default with a unit is in
-            SI units, or a quantity with units, e.g. ``0.5 * syu.micrometer``.
-        conductivity: Default conductivity of the fiber material in S/m, if
-            any.
-        specific_area: Default specific area in 1/m, if any.
-        fiber_diameter: Default fiber diameter in m, if any.
-        kozeny_carman_constant: Default Kozeny-Carman constant, if any.
-        pore_length: Default characteristic pore length of Ergun's drag in
-            m, if any.
+        porosity: The porosity.
+        conductivity: The conductivity of the fiber material, in S/m.
+        specific_area: The specific area, in 1/m.
+        fiber_diameter: The fiber diameter, in m.
+        kozeny_carman_constant: The Kozeny-Carman constant.
+        pore_length: The characteristic pore length of Ergun's drag, in m.
     """
 
     _markers: tuple[str, ...]
     """Cell markers of the electrode."""
 
-    _porosity: Parameter
+    _porosity: ufl.core.expr.Expr
     """Porosity."""
 
-    _conductivity: Parameter
+    _conductivity: ufl.core.expr.Expr
     """Conductivity of the fiber material."""
 
-    _specific_area: Parameter
+    _specific_area: ufl.core.expr.Expr
     """Specific area."""
 
-    _fiber_diameter: Parameter
+    _fiber_diameter: ufl.core.expr.Expr
     """Fiber diameter."""
 
-    _kozeny_carman_constant: Parameter
+    _kozeny_carman_constant: ufl.core.expr.Expr
     """Kozeny-Carman constant."""
 
-    _pore_length: Parameter
+    _pore_length: ufl.core.expr.Expr
     """Characteristic pore length of Ergun's drag."""
 
     def __init__(
@@ -94,48 +101,48 @@ class PorousElectrode:
         name: str,
         domain: Domain,
         markers: tuple[str, ...] = (),
-        porosity: float | None = None,
-        conductivity: float | sympy.Expr | None = None,
-        specific_area: float | sympy.Expr | None = None,
-        fiber_diameter: float | sympy.Expr | None = None,
-        kozeny_carman_constant: float | None = None,
-        pore_length: float | sympy.Expr | None = None,
+        porosity: ExpressionOrDefault = None,
+        conductivity: ExpressionOrDefault = None,
+        specific_area: ExpressionOrDefault = None,
+        fiber_diameter: ExpressionOrDefault = None,
+        kozeny_carman_constant: ExpressionOrDefault = None,
+        pore_length: ExpressionOrDefault = None,
     ):
         self._markers = tuple(markers)
-        self._porosity = Parameter(
-            f"{name}.porosity", domain, default=porosity, doc="Porosity"
+        self._porosity = expression_or_parameter(
+            f"{name}.porosity", porosity, domain, doc="Porosity"
         )
-        self._conductivity = Parameter(
+        self._conductivity = expression_or_parameter(
             f"{name}.conductivity",
+            conductivity,
             domain,
-            default=conductivity,
             unit=syu.siemens / syu.m,
             doc="Conductivity of the fiber material",
         )
-        self._specific_area = Parameter(
+        self._specific_area = expression_or_parameter(
             f"{name}.specific_area",
+            specific_area,
             domain,
-            default=specific_area,
             unit=1 / syu.m,
             doc="Specific area",
         )
-        self._fiber_diameter = Parameter(
+        self._fiber_diameter = expression_or_parameter(
             f"{name}.fiber_diameter",
+            fiber_diameter,
             domain,
-            default=fiber_diameter,
             unit=syu.m,
             doc="Fiber diameter",
         )
-        self._kozeny_carman_constant = Parameter(
+        self._kozeny_carman_constant = expression_or_parameter(
             f"{name}.kozeny_carman_constant",
+            kozeny_carman_constant,
             domain,
-            default=kozeny_carman_constant,
             doc="Kozeny-Carman constant",
         )
-        self._pore_length = Parameter(
+        self._pore_length = expression_or_parameter(
             f"{name}.pore_length",
+            pore_length,
             domain,
-            default=pore_length,
             unit=syu.m,
             doc="Characteristic pore length of Ergun's drag",
         )
@@ -151,17 +158,17 @@ class PorousElectrode:
         return Region(self._markers, self._porosity)
 
     @property
-    def porosity(self) -> Parameter:
+    def porosity(self) -> ufl.core.expr.Expr:
         """Porosity."""
         return self._porosity
 
     @property
-    def specific_area(self) -> Parameter:
+    def specific_area(self) -> ufl.core.expr.Expr:
         """Specific area."""
         return self._specific_area
 
     @property
-    def fiber_diameter(self) -> Parameter:
+    def fiber_diameter(self) -> ufl.core.expr.Expr:
         """Fiber diameter."""
         return self._fiber_diameter
 
